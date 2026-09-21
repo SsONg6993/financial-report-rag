@@ -1,0 +1,8 @@
+streamlit>=1.40,<2
+requests>=2.32,<3
+beautifulsoup4>=4.12,<5
+lxml>=5,<7
+sentence-transformers>=3,<6
+qdrant-client>=1.12,<2
+python-dotenv>=1,<2
+pytest>=8,<10
