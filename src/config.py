@@ -30,7 +30,7 @@ class AppConfig:
             embedding_model=os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5"),
             qdrant_path=os.getenv("QDRANT_PATH", "data/vector_store"),
             ollama_base_url=os.getenv("OLLAMA_BASE_URL", os.getenv("OLLAMA_URL", "http://localhost:11434")),
-            ollama_model=os.getenv("OLLAMA_MODEL", "llama3.2"),
+            ollama_model=os.getenv("OLLAMA_MODEL", "qwen3:4b"),
             enable_jev=_boolean("ENABLE_JEV"),
             typesafe_api_key=os.getenv("TYPESAFE_API_KEY", "").strip(),
             jev_model=os.getenv("JEV_MODEL", "jev-latest"),

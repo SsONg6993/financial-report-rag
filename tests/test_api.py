@@ -134,7 +134,9 @@ def test_watch_follow_and_sourced_ask(client):
         "/api/ask", json={"question": "Why did Berkshire reduce AAPL?"}
     ).json()
     assert "no sourced" in no_motive["answer"]
-    assert not no_motive["evidence"]
+    assert no_motive["evidence"]
+    assert "does not provide the reason" in no_motive["sections"]["short_answer"]
+    assert no_motive["sections"]["numbers"]
 
 
 @pytest.mark.parametrize(

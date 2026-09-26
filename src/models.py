@@ -38,6 +38,12 @@ class AnnualFinancials:
 @dataclass(slots=True)
 class MarketSnapshot:
     ticker: str
+    previous_close: float | None = None
+    quote_as_of: str | None = None
+    fetched_at: str | None = None
+    provider: str = ""
+    source_url: str = ""
+    status: str = "unavailable"
     price: float | None = None
     market_cap: float | None = None
     high_52_week: float | None = None

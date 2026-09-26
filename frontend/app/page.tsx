@@ -1,5 +1,6 @@
 import { HomeFeed } from "@/features/home/home-feed";
 import { SearchBox } from "@/components/research-ui";
+import { MarketPulsePreview } from "@/features/market-pulse/pulse";
 export default function Home() {
   return (
     <div className="page">
@@ -15,6 +16,7 @@ export default function Home() {
         <SearchBox />
       </div>
       <HomeFeed />
+      <MarketPulsePreview />
     </div>
   );
 }

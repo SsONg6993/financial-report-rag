@@ -106,9 +106,66 @@ export const companySchema = z.object({
       market_cap: z.number().nullable().optional(),
       trailing_pe: z.number().nullable().optional(),
       currency: z.string().optional(),
+      previous_close: z.number().nullable().optional(),
+      quote_as_of: z.string().nullable().optional(),
+      fetched_at: z.string().nullable().optional(),
+      provider: z.string().optional(),
+      source_url: z.string().optional(),
+      status: z.enum(["live", "delayed", "cached", "unavailable"]).optional(),
+      stale: z.boolean().optional(),
     })
     .optional(),
   market_as_of: z.string().optional(),
+  financial_context: z
+    .object({
+      kind: z.enum(["annual", "quarterly"]),
+      period: z.string(),
+      end: z.string(),
+      metrics: z.array(
+        z.object({
+          metric: z.string(),
+          label: z.string(),
+          period: z.string(),
+          value: z.number().nullable(),
+          previous: z.number().nullable(),
+          previous_period: z.string().nullable(),
+          yoy: z.number().nullable(),
+          source_url: z.string(),
+          start: z.string().nullable().optional(),
+        }),
+      ),
+    })
+    .optional(),
+  metric_context: z
+    .array(
+      z.object({
+        metric: z.string(),
+        label: z.string(),
+        current: z.number().nullable(),
+        previous: z.number().nullable(),
+        current_period: z.string(),
+        previous_period: z.string().nullable(),
+        delta: z.number().nullable(),
+        relative_change: z.number().nullable(),
+        status: z.string(),
+        meaning: z.string(),
+        source_url: z.string(),
+        previous_source_url: z.string(),
+      }),
+    )
+    .default([]),
+  risk_cards: z
+    .array(
+      z.object({
+        title: z.string(),
+        summary: z.string(),
+        why_it_matters: z.string(),
+        period: z.string(),
+        source_url: z.string(),
+        evidence: evidenceSchema,
+      }),
+    )
+    .default([]),
   annual: z
     .object({
       fiscal_year: z.number().optional(),
@@ -187,6 +244,17 @@ export const answerSchema = z.object({
   answer: z.string(),
   evidence: z.array(evidenceSchema),
   source: z.string(),
+  sections: z
+    .object({
+      short_answer: z.string(),
+      why: z.array(z.string()),
+      numbers: z.array(z.string()),
+      watch: z.array(z.string()),
+      annual_context: z.array(z.string()).default([]),
+    })
+    .optional(),
+  synthesis_available: z.boolean().optional(),
+  model: z.string().optional(),
 });
 export const disclosureSchema = z.object({
   available: z.boolean(),

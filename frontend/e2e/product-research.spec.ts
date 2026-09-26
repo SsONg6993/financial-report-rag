@@ -1,0 +1,119 @@
+import { test, expect } from "@playwright/test";
+
+// Optional direct QA backend: real cached data, with source refresh disabled.
+test.beforeEach(async ({ page }) => {
+  if (process.env.PRODUCT_QA_API) {
+    await page.route("**/api/**", async (route) => {
+      const url = new URL(route.request().url());
+      const response = await route.fetch({
+        url: `${process.env.PRODUCT_QA_API}${url.pathname}${url.search}`,
+      });
+      await route.fulfill({ response });
+    });
+  }
+});
+
+test("META AAPL RKLB comparisons, concise risks and quote dates", async ({
+  page,
+}) => {
+  for (const ticker of ["META", "AAPL", "RKLB"]) {
+    await page.goto(`/research/${ticker}`);
+    await expect(
+      page.getByRole("heading", { name: "Why It Matters", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText(/Quote updated/)).toBeVisible();
+    await expect(page.getByText(/Previous close:/)).toBeVisible();
+    await expect(page.getByText(/Previous Q[23] 2025:/).first()).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Key Risks", exact: true }),
+    ).toBeVisible();
+    const excerpts = page.getByText("View original SEC evidence", {
+      exact: true,
+    });
+    expect(await excerpts.count()).toBeLessThanOrEqual(5);
+    if (await excerpts.count()) {
+      await expect(excerpts.first().locator("..")).not.toHaveAttribute(
+        "open",
+        "",
+      );
+      await excerpts.first().click();
+      await expect(excerpts.first().locator("..").locator("p")).toBeVisible();
+      await excerpts.first().click();
+    }
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+    await page.screenshot({
+      path: `test-results/product-${ticker}-${test.info().project.name}.png`,
+      fullPage: true,
+    });
+  }
+});
+
+test("Ask has structured fallback with sources collapsed and no invented motive", async ({
+  page,
+}) => {
+  await page.goto("/ask");
+  await page
+    .getByLabel("What would you like to investigate?")
+    .fill("Why did Berkshire reduce AAPL?");
+  await page
+    .getByRole("button", { name: "Ask ThesisLens", exact: true })
+    .click();
+  for (const title of [
+    "Short Answer",
+    "Why",
+    "Numbers That Matter",
+    "What To Watch",
+  ]) {
+    await expect(
+      page.getByRole("heading", { name: title, exact: true }),
+    ).toBeVisible();
+  }
+  await expect(page.getByText(/does not provide the reason/)).toBeVisible();
+  await expect(
+    page.getByText(/Sources & evidence/).locator(".."),
+  ).not.toHaveAttribute("open", "");
+  await page.screenshot({
+    path: `test-results/product-ask-${test.info().project.name}.png`,
+    fullPage: true,
+  });
+});
+
+test("Ask quarterly numbers and annual context stay separate", async ({
+  page,
+}) => {
+  for (const [ticker, quarter, cash] of [
+    ["RKLB", "Q2 2026", "6M 2026 YTD"],
+    ["META", "Q2 2026", "6M 2026 YTD"],
+    ["AAPL", "Q3 2026", "9M 2026 YTD"],
+  ]) {
+    await page.goto("/ask");
+    await page
+      .getByLabel("What would you like to investigate?")
+      .fill(`What changed in ${ticker}'s latest quarter?`);
+    await page
+      .getByRole("button", { name: "Ask ThesisLens", exact: true })
+      .click();
+    const numbers = page
+      .getByRole("heading", { name: "Numbers That Matter", exact: true })
+      .locator("..");
+    await expect(numbers).toContainText(quarter);
+    await expect(numbers).toContainText(cash);
+    await expect(numbers).not.toContainText("FY2025");
+    await expect(
+      page
+        .getByRole("heading", { name: "Annual context", exact: true })
+        .locator(".."),
+    ).toContainText("FY2025");
+    await expect(
+      page
+        .getByRole("heading", { name: "Short Answer", exact: true })
+        .locator(".."),
+    ).not.toContainText("FY2025");
+  }
+});

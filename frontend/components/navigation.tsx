@@ -18,7 +18,7 @@ export function Navigation() {
         </Link>
         <nav
           aria-label="Main navigation"
-          className="flex items-center overflow-x-auto rounded-xl border border-border/60 bg-card/45 p-1"
+          className="flex min-w-0 items-center overflow-x-auto rounded-xl border border-border/60 bg-card/45 p-1"
         >
           <Link
             className="nav-link"
@@ -27,14 +27,17 @@ export function Navigation() {
           >
             Home
           </Link>
-          {["Discover", "Research", "Ask"].map((x) => (
+          {[
+            ["Discover", "/discover"],
+            ["Research", "/research"],
+            ["Market Pulse", "/market-pulse"],
+            ["Ask", "/ask"],
+          ].map(([x, href]) => (
             <Link
               key={x}
               className="nav-link"
-              aria-current={
-                pathname.startsWith("/" + x.toLowerCase()) ? "page" : undefined
-              }
-              href={"/" + x.toLowerCase()}
+              aria-current={pathname.startsWith(href) ? "page" : undefined}
+              href={href}
             >
               {x}
             </Link>

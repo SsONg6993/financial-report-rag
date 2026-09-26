@@ -234,6 +234,46 @@ def disclosures():
     }
 
 
+@app.post("/api/ask", response_model=Answer)
+def ask(data: AskInput, background: BackgroundTasks):
+    if any(word in data.question.lower() for word in ("news", "macro", "market pulse", "oil prices")):
+        service.market_pulse.schedule(background)
+    return service.ask(data.question.strip(), valid_ticker(data.ticker))
+
+
+@app.get("/api/market-pulse")
+def market_pulse(background: BackgroundTasks):
+    service.market_pulse.schedule(background)
+    return service.market_pulse.feed()
+
+
+@app.get("/api/market-pulse/watchlist")
+def market_pulse_watchlist(background: BackgroundTasks):
+    service.market_pulse.schedule(background)
+    feed = service.market_pulse.feed()
+    return {**feed, "events": [e for e in feed["events"] if e["watchlist_relevant"] and e["recent"]]}
+
+
+@app.post("/api/market-pulse/refresh", status_code=202)
+def market_pulse_refresh(background: BackgroundTasks):
+    service.market_pulse.schedule(background)
+    return {"status": "Refresh requested; source-specific cooldowns still apply."}
+
+
+@app.get("/api/market-pulse/{event_id}")
+def market_pulse_detail(event_id: str):
+    result = service.market_pulse.detail(event_id)
+    if result is None:
+        raise HTTPException(404, "Event unavailable or outside recent cached coverage")
+    return result
+
+
+@app.get("/api/market-pulse/{event_id}/impacts")
+def market_pulse_impacts(event_id: str):
+    return {"impacts": market_pulse_detail(event_id)["impacts"]}
+
+
+# Keep the existing catch-all disclosure route after the specific Pulse routes.
 @app.get("/api/{kind}/{ticker}")
 def timed_disclosures(
     kind: Literal["insiders", "ownership"], ticker: str, background: BackgroundTasks
@@ -250,8 +290,3 @@ def timed_disclosures(
         "refresh": service.cache_state(kind, ticker),
         "available": bool(snapshots),
     }
-
-
-@app.post("/api/ask", response_model=Answer)
-def ask(data: AskInput):
-    return service.ask(data.question.strip(), valid_ticker(data.ticker))

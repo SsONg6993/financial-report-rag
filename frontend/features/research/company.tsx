@@ -397,13 +397,31 @@ export function CompanyResearch({ ticker }: { ticker: string }) {
   if (q.isError) return <ErrorState retry={() => q.refetch()} />;
   const c = q.data;
   const a = c.annual;
+  const context = c.financial_context;
+  const quarterly = context?.kind === "quarterly";
+  const revenue = context?.metrics.find((m) => m.metric === "revenue");
+  const income = context?.metrics.find((m) => m.metric === "net_income");
   const fcfMargin =
-    a?.revenue && a.free_cash_flow != null
+    !quarterly && a?.revenue && a.free_cash_flow != null
       ? a.free_cash_flow / a.revenue
       : null;
   const metrics = [
-    { label: "Revenue growth", value: a?.revenue_growth, Icon: TrendingUp },
-    { label: "Net margin", value: a?.net_margin, Icon: Gauge },
+    {
+      label: "Revenue growth",
+      value: quarterly ? revenue?.yoy : a?.revenue_growth,
+      Icon: TrendingUp,
+    },
+    {
+      label: "Net margin",
+      value: quarterly
+        ? revenue?.value &&
+          income?.value != null &&
+          income.start === revenue.start
+          ? income.value / revenue.value
+          : null
+        : a?.net_margin,
+      Icon: Gauge,
+    },
     { label: "FCF margin", value: fcfMargin, Icon: Banknote },
   ];
   return (
@@ -439,7 +457,10 @@ export function CompanyResearch({ ticker }: { ticker: string }) {
           {[
             ["Price", money(c.market?.price)],
             ["Market cap", money(c.market?.market_cap)],
-            ["Revenue", money(a?.revenue)],
+            [
+              `Revenue · ${context?.period ?? `Latest annual · FY${a?.fiscal_year ?? "?"}`}`,
+              money(context ? revenue?.value : a?.revenue),
+            ],
             [
               "Trailing P/E",
               c.market?.trailing_pe?.toFixed(1) ?? "Unavailable",
@@ -456,8 +477,27 @@ export function CompanyResearch({ ticker }: { ticker: string }) {
         </div>
         <p className="source mt-5 inline-flex items-center gap-1.5">
           <CalendarDays size={13} aria-hidden />
-          Market snapshot {c.market_as_of?.slice(0, 10) || "unavailable"} · not
-          a live quote
+          {c.market?.status ?? "unavailable"} · Quote updated{" "}
+          {c.market?.quote_as_of || c.market_as_of || "date unavailable"}
+          {c.market?.provider && ` · ${c.market.provider}`}
+        </p>
+        <p className="source">
+          Previous close: {money(c.market?.previous_close)}
+          {c.market?.status === "cached" &&
+            " · Showing the last successful saved quote; the current source check has not supplied a fresh value."}
+          {c.market?.source_url && (
+            <>
+              {" "}
+              ·{" "}
+              <a
+                href={c.market.source_url}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Quote source ↗
+              </a>
+            </>
+          )}
         </p>
       </section>
       {!c.available && (
@@ -499,50 +539,138 @@ export function CompanyResearch({ ticker }: { ticker: string }) {
                 "No verified institutional or insider signal is assumed."}
             </p>
           </article>
-          <article className="panel">
-            <span className="icon-shell">
-              <TrendingUp size={18} aria-hidden />
-            </span>
-            <h3 className="mt-4">Business momentum</h3>
-            <p className="metric mt-2">{percent(a?.revenue_growth)}</p>
-            <p className="muted mt-1 text-sm">
-              Latest annual revenue growth, where available.
-            </p>
-          </article>
-          <article className="panel">
-            <span className="icon-shell">
-              <Banknote size={18} aria-hidden />
-            </span>
-            <h3 className="mt-4">Cash generation</h3>
-            <p className="metric mt-2">{money(a?.free_cash_flow)}</p>
-            <p className="muted mt-1 text-sm">
-              Free cash flow after capital spending.
-              <Help
-                label="What is FCF?"
-                text="Free cash flow (FCF) is operating cash generated after capital expenditures."
-              />
-            </p>
-          </article>
-          <article className="panel">
-            <span className="icon-shell">
-              <ShieldAlert size={18} aria-hidden />
-            </span>
-            <h3 className="mt-4">Evidence to challenge</h3>
-            <p className="metric mt-2">{c.risks.length || "—"}</p>
-            <p className="muted mt-1 text-sm">
-              Sourced risk excerpts currently available for review.
-            </p>
-          </article>
+          {c.metric_context.map((metric) => (
+            <article className="panel" key={metric.metric}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="icon-shell">
+                  <TrendingUp size={18} aria-hidden />
+                </span>
+                <span className="pill">{metric.status}</span>
+              </div>
+              <h3 className="mt-4">{metric.label}</h3>
+              <p className="metric mt-2">
+                {["free_cash_flow", "revenue", "net_income"].includes(
+                  metric.metric,
+                )
+                  ? money(metric.current)
+                  : percent(metric.current)}
+              </p>
+              <p className="source">
+                {metric.current_period} · Previous{" "}
+                {metric.previous_period ?? "unavailable"}:{" "}
+                {["free_cash_flow", "revenue", "net_income"].includes(
+                  metric.metric,
+                )
+                  ? money(metric.previous)
+                  : percent(metric.previous)}
+              </p>
+              <p className="mt-3 text-sm font-medium text-primary">
+                {metric.delta == null
+                  ? "Comparable value unavailable"
+                  : `${metric.delta > 0 ? "↑" : metric.delta < 0 ? "↓" : "→"} ${["free_cash_flow", "revenue", "net_income"].includes(metric.metric) ? (metric.relative_change == null ? money(metric.delta) : percent(metric.relative_change)) : `${(metric.delta * 100).toFixed(1)} percentage points`}`}
+              </p>
+              <p className="muted mt-2 text-sm">{metric.meaning}</p>
+              {metric.metric === "free_cash_flow" && (
+                <Help
+                  label="What is FCF?"
+                  text="Free cash flow is cash generated from operations after capital spending. A negative value means spending exceeded operating cash generation."
+                />
+              )}
+              {metric.source_url && (
+                <p className="source">
+                  <a href={metric.source_url}>Current evidence ↗</a>
+                  {metric.previous_source_url && (
+                    <>
+                      {" "}
+                      ·{" "}
+                      <a href={metric.previous_source_url}>
+                        Previous evidence ↗
+                      </a>
+                    </>
+                  )}
+                </p>
+              )}
+            </article>
+          ))}
+          {!c.metric_context.length && (
+            <div className="empty">
+              Comparable financial periods are not available yet. No growth or
+              cash-generation rating is inferred.
+            </div>
+          )}
         </div>
       </Section>
       <Section
-        title="Visual Snapshot"
+        title="Financial Snapshot"
         aside={
-          a?.fiscal_year ? (
-            <span className="pill">FY{a.fiscal_year} · SEC facts</span>
+          context?.period || a?.fiscal_year ? (
+            <span className="pill">
+              {context?.period ?? `Latest annual · FY${a?.fiscal_year}`} · SEC
+              facts
+            </span>
           ) : undefined
         }
       >
+        {context && (
+          <div className="panel mb-5">
+            <h3>Numbers That Matter</h3>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {context.metrics.map((m) => (
+                <div
+                  key={m.metric}
+                  className="rounded-xl border border-border p-4"
+                >
+                  <p>{m.label}</p>
+                  <p className="mt-2 font-semibold text-primary">{m.period}</p>
+                  <p className="metric mt-2">
+                    {m.metric === "revenue_growth"
+                      ? percent(m.value)
+                      : m.metric === "eps" && m.value != null
+                        ? `$${m.value.toFixed(2)}`
+                        : money(m.value)}
+                  </p>
+                  <p className="source">
+                    {m.metric === "revenue_growth" && m.value != null
+                      ? `YoY · ${m.previous_period ?? "prior year"}`
+                      : m.yoy != null
+                        ? `${percent(m.yoy)} YoY · ${m.previous_period}`
+                        : "Comparable growth unavailable"}
+                  </p>
+                  {m.previous != null && (
+                    <p className="source">
+                      Previous {m.previous_period}:{" "}
+                      {m.metric === "eps"
+                        ? `$${m.previous.toFixed(2)}`
+                        : money(m.previous)}
+                    </p>
+                  )}
+                  {m.source_url && (
+                    <a className="source" href={m.source_url}>
+                      SEC facts ↗
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+            {quarterly && a?.fiscal_year && (
+              <details className="mt-5">
+                <summary>
+                  Annual context · Latest annual · FY{a.fiscal_year}
+                </summary>
+                <p className="source">
+                  Revenue: {money(a.revenue)} · Revenue growth:{" "}
+                  {percent(a.revenue_growth)} · Free cash flow:{" "}
+                  {money(a.free_cash_flow)}
+                </p>
+                {a.source_url && (
+                  <a className="source" href={a.source_url}>
+                    Annual SEC facts ↗
+                  </a>
+                )}
+              </details>
+            )}
+          </div>
+        )}
         <div className="panel">
           <div className="flex items-center gap-3">
             <span className="icon-shell">
@@ -551,7 +679,8 @@ export function CompanyResearch({ ticker }: { ticker: string }) {
             <div>
               <h3>Financial pulse</h3>
               <p className="source !mt-0">
-                A compact view of the latest annual percentages
+                {context?.period ?? "Latest annual"} · FCF margin unavailable
+                when cash flow and revenue durations differ
               </p>
             </div>
           </div>
@@ -650,6 +779,8 @@ export function CompanyResearch({ ticker }: { ticker: string }) {
             </div>
             <p className="muted mb-4 text-sm">
               Evidence-backed questions to investigate—not recommendations.
+              {quarterly &&
+                " Annual financial ideas retain their original fiscal-year labels; they are background context, not latest-quarter metrics."}
             </p>
             <div className="space-y-4">
               {c.suggestions.map((suggestion) => (
@@ -680,13 +811,43 @@ export function CompanyResearch({ ticker }: { ticker: string }) {
               Read the source language and decide what could challenge the idea.
             </p>
             <div className="space-y-4">
-              {c.risks.map((risk, index) => (
+              {c.risk_cards.map((risk, index) => (
                 <article className="panel" key={index}>
-                  <Sources evidence={[risk]} />
+                  <span className="icon-shell">
+                    <ShieldAlert size={18} aria-hidden />
+                  </span>
+                  <h3 className="mt-4">{risk.title}</h3>
+                  <p className="muted mt-3 text-sm leading-6">{risk.summary}</p>
+                  <p className="mt-3 text-sm">
+                    <strong>Why it matters:</strong> {risk.why_it_matters}
+                  </p>
+                  <p className="source">
+                    ThesisLens analysis · Evidence{" "}
+                    {risk.period || "date unavailable"}
+                  </p>
+                  {risk.source_url && (
+                    <p className="source">
+                      <a
+                        href={risk.source_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        View source ↗
+                      </a>
+                    </p>
+                  )}
+                  <details className="mt-4 text-sm">
+                    <summary className="text-primary">
+                      View original SEC evidence
+                    </summary>
+                    <p className="source whitespace-pre-wrap leading-6">
+                      {risk.evidence.text}
+                    </p>
+                  </details>
                 </article>
               ))}
             </div>
-            {!c.risks.length && (
+            {!c.risk_cards.length && (
               <div className="empty">
                 <h3>Risk evidence not cached yet</h3>
                 <p className="mt-2">

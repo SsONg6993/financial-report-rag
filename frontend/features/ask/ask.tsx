@@ -12,6 +12,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 const examples = [
+  "Which recent news may affect my watchlist?",
   "Why did Berkshire reduce AAPL?",
   "Which investors I follow disclose GOOGL?",
   "What changed in AAPL’s latest quarter?",
@@ -100,7 +101,68 @@ export function AskResearch() {
               <h2 className="mt-1">What the evidence supports</h2>
             </div>
           </div>
-          <p className="whitespace-pre-wrap mt-5 leading-7">{m.data.answer}</p>
+          {m.data.sections ? (
+            <div className="mt-6 space-y-6">
+              <section>
+                <h3>Short Answer</h3>
+                <p className="mt-2 leading-7">{m.data.sections.short_answer}</p>
+                <p className="source">
+                  Verified evidence · investor rationale is identified only when
+                  sourced
+                </p>
+              </section>
+              {[
+                ["Why", m.data.sections.why],
+                ["Numbers That Matter", m.data.sections.numbers],
+                ["What To Watch", m.data.sections.watch],
+              ].map(([title, items]) => (
+                <section key={String(title)}>
+                  <h3>{String(title)}</h3>
+                  <div className="mt-2 space-y-2">
+                    {(items as string[]).length ? (
+                      (items as string[]).map((item, index) => (
+                        <p
+                          className={`text-sm leading-6 whitespace-pre-line ${title === "Numbers That Matter" ? "rounded-xl border border-border p-4 font-medium" : "muted"}`}
+                          key={index}
+                        >
+                          {item}
+                        </p>
+                      ))
+                    ) : (
+                      <p className="text-sm muted">
+                        No verified values available for this question.
+                      </p>
+                    )}
+                  </div>
+                  {title === "Why" && (
+                    <p className="source">
+                      ThesisLens analysis · separate from investor-stated
+                      rationale
+                    </p>
+                  )}
+                </section>
+              ))}
+              {m.data.sections.annual_context.length > 0 && (
+                <section>
+                  <h3>Annual context</h3>
+                  <div className="mt-2 space-y-2">
+                    {m.data.sections.annual_context.map((item, index) => (
+                      <p
+                        key={index}
+                        className="text-sm muted whitespace-pre-line"
+                      >
+                        {item}
+                      </p>
+                    ))}
+                  </div>
+                </section>
+              )}
+            </div>
+          ) : (
+            <p className="whitespace-pre-wrap mt-5 leading-7">
+              {m.data.answer}
+            </p>
+          )}
           <details className="mt-5">
             <summary className="text-sm text-primary">
               Sources &amp; evidence ({m.data.evidence.length})
