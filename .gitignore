@@ -1,10 +1,14 @@
 .env
 .venv/
+.ruff_cache/
+.mypy_cache/
 __pycache__/
 .pytest_cache/
-data/raw/*
-data/processed/*
-data/vector_store/*
+data/raw/
+data/processed/
+data/vector_store/
+data/cache/
+data/local/
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/vector_store/.gitkeep

@@ -5,10 +5,12 @@ from pathlib import Path
 
 from qdrant_client import QdrantClient, models
 
+INDEX_SCHEMA_VERSION = 2
+
 
 def collection_name(filing: dict, model_name: str) -> str:
-    key = f"{filing['ticker']}:{filing['accession_number']}:{model_name}"
-    return "filing_" + hashlib.sha256(key.encode()).hexdigest()[:20]
+    key = f"v{INDEX_SCHEMA_VERSION}:{filing['ticker']}:{filing['accession_number']}:{model_name}"
+    return f"filing_v{INDEX_SCHEMA_VERSION}_" + hashlib.sha256(key.encode()).hexdigest()[:20]
 
 
 class Retriever:
@@ -43,4 +45,23 @@ class Retriever:
         results = self.client.query_points(
             collection_name=name, query=vector, limit=top_k, with_payload=True
         ).points
-        return [{"score": hit.score, **hit.payload} for hit in results]
+        return [
+            {"score": hit.score, "backend": "dense", "backend_rank": rank, **hit.payload}
+            for rank, hit in enumerate(results, 1)
+        ]
+
+    def all_chunks(self, name: str) -> list[dict]:
+        chunks: list[dict] = []
+        offset = None
+        while True:
+            points, offset = self.client.scroll(
+                collection_name=name,
+                limit=256,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            chunks.extend(dict(point.payload or {}) for point in points)
+            if offset is None:
+                break
+        return sorted(chunks, key=lambda item: item.get("chunk_ordinal", 0))

@@ -6,7 +6,6 @@ from pathlib import Path
 
 import requests
 
-
 SEC_DATA = "https://data.sec.gov"
 SEC_WWW = "https://www.sec.gov"
 ANNUAL_FORMS = {"10-K", "20-F"}
@@ -35,6 +34,11 @@ def get_json(session: requests.Session, url: str) -> dict:
 
 
 def list_annual_filings(ticker: str) -> list[dict]:
+    return list_company_filings(ticker, ANNUAL_FORMS)
+
+
+def list_company_filings(ticker: str, forms: set[str] | None = None) -> list[dict]:
+    forms = forms or {"10-K", "10-Q", "20-F"}
     ticker = normalize_ticker(ticker)
     session = sec_session()
     companies = get_json(session, f"{SEC_WWW}/files/company_tickers.json")
@@ -49,7 +53,7 @@ def list_annual_filings(ticker: str) -> list[dict]:
     recent = submissions["filings"]["recent"]
     filings = []
     for index, form in enumerate(recent["form"]):
-        if form not in ANNUAL_FORMS:
+        if form not in forms:
             continue
         accession = recent["accessionNumber"][index]
         document = recent["primaryDocument"][index]
@@ -61,6 +65,7 @@ def list_annual_filings(ticker: str) -> list[dict]:
         )
         filings.append({
             "ticker": ticker,
+            "cik": cik,
             "company": submissions.get("name", company["title"]),
             "form": form,
             "year": int(report_date[:4]) if report_date else int(recent["filingDate"][index][:4]),
@@ -73,7 +78,16 @@ def list_annual_filings(ticker: str) -> list[dict]:
 
 
 def download_filing(filing: dict, raw_dir: Path = Path("data/raw")) -> Path:
-    path = raw_dir / normalize_ticker(filing["ticker"]) / str(filing["year"]) / "filing.html"
+    # Accession-scoped paths prevent different quarters/forms overwriting one another.
+    path = raw_dir / normalize_ticker(filing["ticker"]) / filing["accession_number"].replace("-", "") / "filing.html"
+    legacy_path = raw_dir / normalize_ticker(filing["ticker"]) / str(filing["year"]) / "filing.html"
+    # Reuse the former annual cache only when its embedded SEC accession matches.
+    if not path.exists() and legacy_path.exists() and filing["form"] in ANNUAL_FORMS:
+        contents = legacy_path.read_bytes()
+        accession = filing["accession_number"].replace("-", "").encode()
+        if accession in contents:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(contents)
     if path.exists():
         return path
     response = sec_session().get(filing["source_url"], timeout=90)

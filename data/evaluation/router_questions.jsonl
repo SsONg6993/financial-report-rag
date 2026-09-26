@@ -1,0 +1,16 @@
+{"query":"What was revenue in 2025?","expected":"METRIC_LOOKUP"}
+{"query":"Show net income for fiscal 2024","expected":"METRIC_LOOKUP"}
+{"query":"What was diluted EPS in 2023?","expected":"METRIC_LOOKUP"}
+{"query":"Calculate revenue CAGR from 2022 to 2025","expected":"CALCULATION"}
+{"query":"What is the free cash flow margin?","expected":"CALCULATION"}
+{"query":"Calculate return on equity","expected":"CALCULATION"}
+{"query":"Why did Services revenue increase?","expected":"FILING_RAG"}
+{"query":"What does management say about demand?","expected":"FILING_RAG"}
+{"query":"What drove the margin change?","expected":"FILING_RAG"}
+{"query":"Run a DCF valuation","expected":"VALUATION"}
+{"query":"What terminal growth rate is implied?","expected":"VALUATION"}
+{"query":"Compare Apple and Microsoft margins","expected":"PEER_COMPARISON"}
+{"query":"How does AAPL valuation compare with GOOGL?","expected":"PEER_COMPARISON"}
+{"query":"Classify the disclosed cybersecurity risks","expected":"RISK_ANALYSIS"}
+{"query":"Analyze changes in regulatory risk","expected":"RISK_ANALYSIS"}
+{"query":"Prepare a broad company research overview","expected":"GENERAL_RESEARCH"}

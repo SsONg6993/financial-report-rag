@@ -4,7 +4,9 @@ from src.parser import section_at
 
 
 def chunk_filing(text: str, ticker: str, year: int, form: str,
-                 chunk_size: int = 1200, overlap: int = 180) -> list[dict]:
+                 chunk_size: int = 1200, overlap: int = 180,
+                 company: str = "", filing_date: str = "",
+                 source_url: str = "") -> list[dict]:
     if chunk_size <= overlap or overlap < 0:
         raise ValueError("chunk_size must be greater than nonnegative overlap")
     chunks = []
@@ -24,6 +26,12 @@ def chunk_filing(text: str, ticker: str, year: int, form: str,
                 "form": form,
                 "section": section_at(text, form, start),
                 "text": excerpt,
+                "company": company,
+                "filing_date": filing_date,
+                "source_url": source_url,
+                "chunk_ordinal": len(chunks),
+                "start_char": start,
+                "end_char": end,
             })
         if end == len(text):
             break
