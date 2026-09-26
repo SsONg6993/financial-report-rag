@@ -4,6 +4,12 @@
 .mypy_cache/
 __pycache__/
 .pytest_cache/
+frontend/node_modules/
+frontend/.next/
+frontend/test-results/
+frontend/playwright-report/
+frontend/*.tsbuildinfo
+frontend/.env.local
 data/raw/
 data/processed/
 data/vector_store/
@@ -12,3 +18,8 @@ data/local/
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/vector_store/.gitkeep
+
+.pytest-temp/
+*.db
+*.sqlite
+*.sqlite3

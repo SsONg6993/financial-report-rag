@@ -13,7 +13,7 @@ from src.sec import download_filing, list_company_filings, normalize_ticker
 from src.thesis import financial_changes, serialize_financials
 
 
-def load_company(ticker: str, store, refresh: bool = False) -> tuple[dict | None, list[str]]:
+def load_company(ticker: str, store, refresh: bool = False, include_market: bool = True) -> tuple[dict | None, list[str]]:
     ticker = normalize_ticker(ticker)
     cached = store.snapshots("company", ticker)
     existing = cached[0] if cached else {}
@@ -32,12 +32,12 @@ def load_company(ticker: str, store, refresh: bool = False) -> tuple[dict | None
     market = existing.get("market", asdict(MarketSnapshot(ticker)))
     market_as_of = existing.get("market_as_of", "")
     try:
-        observed_market = asdict(YahooFinanceProvider().snapshot(ticker))
+        observed_market = asdict(YahooFinanceProvider().snapshot(ticker)) if include_market else market
         if observed_market.get("error"):
             errors.append(observed_market["error"])
         else:
             market = observed_market
-            market_as_of = utc_now()
+            market_as_of = utc_now() if include_market else market_as_of
     except Exception as exc:  # noqa: BLE001 - market data never gates SEC research.
         errors.append(f"Market data unavailable: {exc}")
     if not filings and not financials:

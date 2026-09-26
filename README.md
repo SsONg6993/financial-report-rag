@@ -1,10 +1,124 @@
 # ThesisLens
 
+Follow great investors. Understand what they own. Verify the thesis yourself.
+
+## Primary application: Next.js + FastAPI
+
+The consumer app is now `frontend/`, with only **Home, Discover, Research, Ask** in its primary navigation. Streamlit is retained only as an internal/debug workspace. Public holdings are research inputs, not recommendations; position changes do not establish motive.
+
+```text
+Next.js 16 / React 19 / TypeScript / Tailwind 4 / shadcn / TanStack Query / Zod
+                              ↓ same-origin /api proxy
+FastAPI / Pydantic → existing src/ financial and retrieval services
+                              ↓
+SEC EDGAR + XBRL / local SQLite / Qdrant + BM25S / optional Jev + Ollama
+```
+
+### Run the backend (PowerShell terminal 1)
+
+Python 3.12 recommended; preserve an existing `.env`. A new installation needs `SEC_USER_AGENT` with a contact email, not credentials committed to source control.
+
+```powershell
+cd C:\Users\User\Documents\Projects\financial-report-rag
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+```
+
+API reference: http://127.0.0.1:8000/docs. This is a **local, single-user** application, without authentication or tenant isolation. Do not expose the backend to the public internet. Production hosting requires authentication, authorization, rate limiting, and deployment hardening.
+
+### Run the frontend (PowerShell terminal 2)
+
+Node.js 22 LTS recommended. `package-lock.json` locks installed versions.
+
+```powershell
+cd C:\Users\User\Documents\Projects\financial-report-rag\frontend
+npm.cmd ci
+npm.cmd run dev
+```
+
+Open http://localhost:3000. Production verification: `npm.cmd run build`, then `npm.cmd run start`. Set server-side `API_URL` only if the backend is not at `http://127.0.0.1:8000`. No API credentials belong in `NEXT_PUBLIC_*` variables.
+
+### Product API
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| GET | `/api/home/feed`, `/api/investors` | Discovery, activity, ideas, watchlist |
+| GET | `/api/investors/{id}`, `/holdings`, `/changes` | Profile, reported positions, deterministic share changes |
+| PUT | `/api/investors/{id}/follow` | Persist followed institution |
+| GET | `/api/company/{ticker}`, `/changes`, `/suggested-theses`, `/theses` | Company research and evidence |
+| PUT | `/api/company/{ticker}/watch` | Persist watchlist |
+| PUT | `/api/company/{ticker}/suggestions/{suggestion_id}/ignore` | Persist ignored suggestion (set `enabled:false` to restore) |
+| POST / PUT | `/api/theses`, `/api/theses/{id}` | Track/edit a thesis |
+| POST | `/api/theses/{id}/evaluate` | Evidence-linked evaluation and timeline |
+| GET | `/api/disclosures`, `/api/insiders/{ticker}`, `/api/ownership/{ticker}` | Separate disclosure clocks and source metadata |
+| GET | `/api/public-officials` | Quality-gated, range-preserving OGE summaries |
+| POST | `/api/ask` | Bounded factual lookups, Python comparisons, optional grounded Ollama |
+
+Suffixes in the table use their preceding investor/company prefix. All write requests are validated with Pydantic; key product responses have Pydantic contracts, and frontend boundaries use Zod.
+
+### Freshness and source handling
+
+Request-triggered background refresh uses persistent check/error timestamps, process-local single-flight suppression, source timeouts, and a conservative SEC rate limit of 4 requests/second per backend process. Cached research remains available during refresh or source failures. Failed checks are cached too; reopening a page does not repeatedly hammer a blocked source.
+
+| Source | Check interval | Important distinction |
+| --- | --- | --- |
+| Yahoo market snapshot | 5 minutes | Optional, delayed/unavailable; timestamp is shown |
+| Official ARKK holdings | 24 hours | Fund-level daily holdings, not institutional 13F |
+| SEC Form 4 | 30 minutes | Insider transaction date and filing date; P/S codes label BUY/SELL, not recommendations |
+| Schedule 13D/G | 1 hour | Disclosed ownership percentage, filer and amendment; no inferred motives |
+| Institutional 13F | 6 hours | Filing checks; quarterly reporting dates and filing dates remain separate |
+| Company filings + facts | 6 hours | Financial reporting periods are independent of check time |
+| OGE | 24 hours in refresh service | Separate official PDF import; range preservation and quality gates |
+
+There is no unattended scheduler. Home refreshes followed investors/watchlist companies; opening an investor/company profile checks its sources. Form 4/ownership panels refresh independently. OGE importing remains explicit in the internal workspace. Immutable SEC disclosure documents are cached by accession and written through an incomplete file before promotion.
+
+Optional explicit warm-up (real sources, not demo fixtures):
+
+```powershell
+cd C:\Users\User\Documents\Projects\financial-report-rag
+.\.venv\Scripts\python.exe -m backend.refresh --investor berkshire --investor pershing --company AAPL --company NVDA --company GOOGL --disclosures
+```
+
+`--company` and `--investor` can be repeated. `THESISLENS_OFFLINE=true` disables request-triggered network refresh while retaining cached functionality.
+
+Featured adapters: Berkshire, Pershing, Appaloosa, Bridgewater, Scion, Duquesne, Soros, Tiger Global, Coatue, and official ARKK. Unavailable/stale investors stay visible. Exact issuer-name ticker matching is deliberately incomplete; an unmapped security is not guessed. Common share classes can be resolved from explicit cached SEC filing-cover rows (for example Alphabet Class A/GOOGL and Class C/GOOG), with the mapping source retained. Duplicate legacy cache keys are deduplicated by source/period before comparisons. Sector exposure can remain Unclassified. Originals only: 13F amendments are not consolidated.
+
+### Suggested theses and What Changed
+
+Research creates up to five **evidence-backed Python hypotheses**, transparently labelled by generator. These are not claimed to be live AI-generated when an LLM is unavailable. Growth, margin, positive FCF and debt tests use available annual facts; a filing-linked risk hypothesis is included when text is available. Each has why it matters, supporting/invalidating conditions, source citations and Track/Edit/Ignore. Eight beginner-friendly categories provide research prompts. Sparse evidence may produce fewer than three suggestions rather than fabricated claims.
+
+Numeric evaluations remain Python-only and explicitly annual. Editing a suggested statement removes its automatic rule; editing a tracked claim resets its current status while preserving history. Narrative evidence evaluation uses optional Jev Choice/confidence and falls back to UNCERTAIN with evidence. Jev is not a calculator, recommendation engine, or replacement for Ollama.
+
+What Changed adds current quarter vs same period last year from SEC facts. It only accepts 70–105-day duration facts, aligns numerator/denominator starts, and never labels YTD cash flow as a quarter. Revenue/margin/FCF/CapEx changes have both-period citations; annual fallback is explicit. Filing phrases compare matching fiscal periods and describe observed text, not a newly created/resolved economic risk. **Segment/geographic XBRL extraction, quarter cash-flow derivation from YTD, broad theme/tone classification and automatic catalyst inference are not yet implemented.**
+
+Ask protects investor motives: “Why did Berkshire reduce AAPL?” returns no sourced explanation when no direct rationale exists. Followed-company exposure is a verified lookup; no match under incomplete mappings is not proof of absence. Existing hybrid retrieval is used when a matching local index exists; otherwise BM25 evidence remains available. The API does not automatically build new dense indexes; the internal workspace retains ingestion/indexing, advanced valuation and reranking.
+
+### Verification and screenshots
+
+See `docs/consumer-verification.md` for actual measured test results, source observations and limitations. Browser tests use a copy of the real local database; they must not target personal saved research. Synthetic fixtures exist only in Python unit tests.
+
+Screenshot locations after browser QA: `frontend/test-results/home-desktop.png`, `discover-desktop.png`, `investor-desktop.png`, `research-desktop.png`, `nvda-desktop.png`, `ask-desktop.png`, plus mobile variants. These are generated artifacts, not mocked screens. Documentation screenshot slots: Home / Discover / Research / investor profile (capture with the E2E suite).
+
+```powershell
+# Python tests, from repository root
+.\.venv\Scripts\python.exe -m pytest -q --basetemp=.pytest_cache\basetemp
+# Frontend checks, from frontend/
+npm.cmd run typecheck
+npm.cmd test
+npm.cmd run build
+npx.cmd playwright install chromium
+npm.cmd run test:e2e
+```
+
+E2E expects a production frontend on port 3000 and a cached QA backend on port 8000. Enable the optional live Zod contract tests with `$env:LIVE_API='true'` before `npm.cmd test`. The installed React/Next/TypeScript/Tailwind/shadcn/TanStack/Zod/UI/Playwright skills shaped component boundaries, validation, cache policies, keyboard access and production-mode QA. The TypeSafe skill required live API/Choice/citation guidance before reusing Jev judgments.
+
+## Internal/debug Streamlit workspace (retained)
+
 An evidence-driven investment thesis monitoring and public-disclosure research system.
 
 ThesisLens helps investors track whether new company evidence strengthens or weakens their own investment thesis, while using public institutional and public-official disclosures for research and idea discovery. It reports evidence relationships and research questions, without BUY / SELL / HOLD recommendations or a numeric investment score.
 
-## Four pages
+### Four internal/debug pages
 
 - **Home**: locally persisted watchlist, thesis-health counts, meaningful comparable-period changes, and followed disclosures.
 - **Research**: a compact company summary, editable thesis points, evidence evaluation, thesis timeline, dated changes, and an investigation checklist. Valuation and technical evidence tools are collapsed.
@@ -104,8 +218,8 @@ Backend evaluation inputs and functions are retained. Existing AAPL FY2025 retri
 ## Verification
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q
-python -m ruff check app.py src tests
+.\.venv\Scripts\python.exe -m pytest -q --basetemp=.pytest_cache\basetemp
+.\.venv\Scripts\python.exe -m ruff check app.py src backend tests
 ```
 
 Tests preserve prior backend coverage and add local persistence/history, deterministic rules, semantic fallback, 13F parsing/units/options, portfolio activity classes, stale labels, range-preserving OGE handling, provider degradation, comparable-period selection, and four-page Streamlit rendering.

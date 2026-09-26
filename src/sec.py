@@ -2,6 +2,8 @@
 
 import os
 import re
+import threading
+import time
 from pathlib import Path
 
 import requests
@@ -9,6 +11,18 @@ import requests
 SEC_DATA = "https://data.sec.gov"
 SEC_WWW = "https://www.sec.gov"
 ANNUAL_FORMS = {"10-K", "20-F"}
+_SEC_LOCK = threading.Lock()
+_SEC_LAST_REQUEST = 0.0
+
+
+class SecSession(requests.Session):
+    """Process-wide conservative pacing (4 requests/sec, including concurrent callers)."""
+    def request(self, method, url, **kwargs):
+        global _SEC_LAST_REQUEST
+        with _SEC_LOCK:
+            time.sleep(max(0, .25 - (time.monotonic() - _SEC_LAST_REQUEST)))
+            _SEC_LAST_REQUEST = time.monotonic()
+        return super().request(method, url, **kwargs)
 
 
 def normalize_ticker(ticker: str) -> str:
@@ -22,7 +36,7 @@ def sec_session() -> requests.Session:
     user_agent = os.getenv("SEC_USER_AGENT", "").strip()
     if not user_agent or "@" not in user_agent:
         raise ValueError("Set SEC_USER_AGENT in .env with your name and email address.")
-    session = requests.Session()
+    session = SecSession()
     session.headers.update({"User-Agent": user_agent, "Accept-Encoding": "gzip, deflate"})
     return session
 

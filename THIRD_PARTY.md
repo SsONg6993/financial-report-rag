@@ -25,6 +25,25 @@ SEC 13F XML is read using the existing lxml dependency. Official reporting seman
 
 Official ARKK CSV holdings are a separate daily fund adapter. OGE PDF disclosures use a separate range-preserving model and never produce inferred exact portfolio weights. Exact issuer-name ticker matches use the official SEC directory; optional sector metadata comes from Yahoo Finance and displays coverage.
 
+## Consumer app dependencies
+
+| Component / source | License | Why chosen | Modifications |
+| --- | --- | --- | --- |
+| Next.js (`vercel/next.js`) 16.3.6 / React (`facebook/react`) 19.3.0 | MIT | Maintained App Router, server-rendered shell and interactive UI | App-specific routes and same-origin FastAPI proxy; no framework changes |
+| TypeScript (`microsoft/TypeScript`) | Apache-2.0 | Strict frontend compilation | Project configuration only |
+| Tailwind CSS (`tailwindlabs/tailwindcss`) v4 | MIT | CSS-first tokens and responsive layout | ThesisLens theme and small semantic CSS; no library changes |
+| shadcn/ui (`shadcn-ui/ui`), Radix UI (`radix-ui/primitives`) | MIT | Established accessible primitives | Installed Button/Badge/Skeleton/Tooltip via official CLI; generated `cn` imports corrected to local utility, Button transition narrowed to colors |
+| TanStack Query (`TanStack/query`) | MIT | Cache, retries, invalidation and background queries | Provider defaults and feature-specific query keys |
+| Zod (`colinhacks/zod`) v4 | MIT | Runtime API response validation | Product schemas only |
+| Lucide (`lucide-icons/lucide`) | ISC | Small consistent interface icons | No icon changes |
+| clsx / tailwind-merge / class-variance-authority | MIT / MIT / Apache-2.0 | Maintained class composition used by shadcn | Local `cn` wrapper; no library changes |
+| FastAPI (`fastapi/fastapi`) / Pydantic (`pydantic/pydantic`) | MIT | Python HTTP boundary and validated contracts | Thin adapters to existing services |
+| Uvicorn (`encode/uvicorn`) / HTTPX (`encode/httpx`) | BSD-3-Clause | Local ASGI server and API testing | No library changes |
+| Playwright (`microsoft/playwright`) | Apache-2.0 | Production desktop/mobile browser verification | Product journeys and screenshots; no library changes |
+| Vitest (`vitest-dev/vitest`) / Prettier (`prettier/prettier`) | MIT | Boundary unit tests and consistent formatting | Tests/config only |
+
+SEC Form 4 and Schedule 13D/G use lxml and official EDGAR documents, not an LLM parser. Form 4 preserves nested values, transaction codes, roles, dates and footnotes. Modern Schedule XML fields were checked against an actual SEC filing; legacy HTML retains source links and unknown fields. No investment motives are inferred. Existing financial calculations and mature retrieval implementations remain unchanged.
+
 ## Reference projects
 
 FinRobot, ai-hedge-fund, agentii-investment-intelligence, and agentic-financial-rag were treated as conceptual references only. No source code was copied or adapted from those repositories in this milestone.

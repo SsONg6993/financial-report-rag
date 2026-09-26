@@ -16,6 +16,7 @@ from src.portfolios import (
     PortfolioSnapshot,
     compare_portfolios,
     disclosure_freshness,
+    fetch_ark_holdings,
     parse_13f,
     parse_ark_csv,
 )
@@ -189,6 +190,64 @@ def test_ark_is_fund_holdings_not_13f():
     assert snapshot.source_type == "Official ARKK daily fund holdings"
     assert snapshot.holdings[0].ticker == "EX"
     assert snapshot.holdings[0].weight == 1
+
+
+def test_ark_parser_accepts_harmless_column_changes_and_preserves_reported_values():
+    snapshot = parse_ark_csv(
+        "As Of Date,Fund Ticker,Company Name,Symbol,CUSIP,Number of Shares,"
+        "Market Value USD,Portfolio Weight (%)\n"
+        '2026-09-25,ARKK,Tesla Inc,TSLA,88160R101,"2,164,429",'
+        '"$818,024,296.26",9.17%\n',
+        "https://assets.ark-funds.com/current.csv",
+    )
+    holding = snapshot.holdings[0]
+    assert snapshot.reporting_period == "2026-09-25"
+    assert holding.issuer == "Tesla Inc"
+    assert holding.ticker == "TSLA"
+    assert holding.shares == 2_164_429
+    assert holding.reported_value == 818_024_296.26
+    assert holding.weight == pytest.approx(0.0917)
+
+
+def test_ark_fetch_discovers_csv_through_current_fund_document_endpoint():
+    class Response:
+        def __init__(self, url, text):
+            self.url = url
+            self.text = text
+
+        def raise_for_status(self):
+            return None
+
+    class Session:
+        def __init__(self):
+            self.headers = {}
+            self.calls = []
+
+        def get(self, url, **kwargs):
+            self.calls.append((url, kwargs))
+            if url.endswith("/funds/arkk"):
+                return Response(
+                    url,
+                    '<script>url: "/api/fund/document-table/1004"</script>',
+                )
+            if url.endswith("/api/fund/document-table/1004"):
+                return Response(
+                    url,
+                    '<a aria-label="Fund Holdings CSV" '
+                    'href="https://assets.ark-funds.com/current/ARKK_HOLDINGS.csv"></a>',
+                )
+            return Response(
+                "https://assets.ark-funds.com/final/ARKK_HOLDINGS.csv",
+                "date,fund,company,ticker,cusip,shares,market value ($),weight (%)\n"
+                "09/25/2026,ARKK,Example,EX,123,10,100,100%\n",
+            )
+
+    session = Session()
+    snapshot = fetch_ark_holdings(session)
+    assert snapshot.source_url.endswith("/final/ARKK_HOLDINGS.csv")
+    assert snapshot.holdings[0].ticker == "EX"
+    assert all(call[1]["allow_redirects"] is True for call in session.calls)
+    assert "Mozilla" in session.headers["User-Agent"]
 
 
 def test_failed_company_providers_retain_cached_sources(tmp_path, monkeypatch):

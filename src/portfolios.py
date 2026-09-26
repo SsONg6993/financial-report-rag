@@ -32,6 +32,10 @@ INSTITUTIONS = (
     Institution("bridgewater", "Bridgewater Associates", "", "Macro / Diversified", 1350694),
     Institution("ark", "ARK Invest — ARKK", "Cathie Wood", "Innovation / Growth", source_type="Official ARKK daily fund holdings"),
     Institution("scion", "Scion Asset Management", "Michael Burry", "Contrarian / Concentrated", 1649339),
+    Institution("duquesne", "Duquesne Family Office", "Stanley Druckenmiller", "Macro / Concentrated", 1536411),
+    Institution("soros", "Soros Fund Management", "", "Macro / Diversified", 1029160),
+    Institution("tiger", "Tiger Global", "", "Growth / Technology", 1167483),
+    Institution("coatue", "Coatue Management", "", "Growth / Technology", 1135730),
 )
 BY_ID = {item.id: item for item in INSTITUTIONS}
 DISCLOSURE_NOTE = (
@@ -53,6 +57,7 @@ class Holding:
     ticker: str = ""
     weight: float = 0.0
     sector: str = "Unclassified"
+    ticker_source: str = ""
 
     @property
     def key(self):
@@ -251,31 +256,103 @@ def enrich_sectors(snapshot: PortfolioSnapshot):
 
 
 ARK_URL = "https://www.ark-funds.com/funds/arkk"
+ARK_RESOURCES_URL = "https://www.ark-funds.com/download-fund-materials"
+ARK_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,text/csv,application/octet-stream,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+def _ark_column(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", name.lower().lstrip("\ufeff"))
+
+
+def _ark_field(row: dict[str, str], *aliases: str) -> str:
+    for alias in aliases:
+        value = row.get(alias)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def _ark_number(value: str, field_name: str) -> float:
+    cleaned = value.strip().replace(",", "").replace("$", "").replace("%", "")
+    negative = cleaned.startswith("(") and cleaned.endswith(")")
+    cleaned = cleaned.strip("() ")
+    try:
+        number = float(cleaned)
+    except ValueError as exc:
+        raise ValueError(f"ARK {field_name} is not numeric.") from exc
+    return -number if negative else number
+
+
+def _ark_date(value: str) -> str | None:
+    for pattern in ("%m/%d/%Y", "%Y-%m-%d", "%m/%d/%y"):
+        if _date_matches(value, pattern):
+            return datetime.strptime(value, pattern).replace(tzinfo=UTC).date().isoformat()
+    return None
 
 
 def parse_ark_csv(text: str, source_url: str) -> PortfolioSnapshot:
     rows = list(csv.DictReader(io.StringIO(text.lstrip("\ufeff"))))
     holdings = []
+    reported_weights = []
     periods = set()
     for original in rows:
-        row = {key.strip().lower().replace(" ", ""): value for key, value in original.items() if key}
-        if not row.get("ticker") or not row.get("company"):
+        row = {_ark_column(key): value for key, value in original.items() if key}
+        ticker = _ark_field(row, "ticker", "symbol", "stocksymbol")
+        company = _ark_field(row, "company", "companyname", "name", "issuer", "issuername")
+        if not ticker or not company:
             continue
-        raw_date = row.get("date", "")
-        period = next((datetime.strptime(raw_date, pattern).replace(tzinfo=UTC).date().isoformat()
-                       for pattern in ("%m/%d/%Y", "%Y-%m-%d") if _date_matches(raw_date, pattern)), None)
+        fund = _ark_field(row, "fund", "fundticker", "portfolio")
+        if fund and fund.upper() != "ARKK":
+            continue
+        raw_date = _ark_field(row, "date", "asofdate", "holdingsdate", "portfolioasofdate")
+        period = _ark_date(raw_date)
         if not period:
             raise ValueError("ARK holdings lack a valid as-of date.")
+        shares = _ark_number(
+            _ark_field(row, "shares", "sharesholdings", "numberofshares", "quantity"),
+            "shares",
+        )
+        market_value = _ark_number(
+            _ark_field(row, "marketvalue", "marketvalueusd", "positionvalue", "value"),
+            "market value",
+        )
+        raw_weight = _ark_field(
+            row,
+            "weight",
+            "weightpercent",
+            "portfolioweight",
+            "portfolioweightpercent",
+            "percentofnetassets",
+        )
+        if shares < 0 or market_value < 0:
+            raise ValueError("ARK holdings contain a negative share count or market value.")
         periods.add(period)
-        holdings.append(Holding(row["company"], "ARKK fund holding", row.get("cusip", ""),
-                                float(row.get("shares", "0").replace(",", "")),
-                                float(row.get("marketvalue($)", row.get("marketvalue", "0")).replace(",", "").replace("$", "")),
-                                ticker=row["ticker"]))
+        holding = Holding(
+            company,
+            "ARKK fund holding",
+            _ark_field(row, "cusip", "securityidentifier"),
+            shares,
+            market_value,
+            ticker=ticker,
+        )
+        if raw_weight:
+            reported_weight = _ark_number(raw_weight, "portfolio weight")
+            holding.weight = reported_weight / 100 if "%" in raw_weight or reported_weight > 1 else reported_weight
+        holdings.append(holding)
+        reported_weights.append(bool(raw_weight))
     if len(periods) != 1 or not holdings:
         raise ValueError("ARK data is empty or mixes reporting dates.")
     total = sum(row.reported_value for row in holdings)
-    for row in holdings:
-        row.weight = row.reported_value / total if total else 0
+    for row, has_reported_weight in zip(holdings, reported_weights, strict=True):
+        if not has_reported_weight:
+            row.weight = row.reported_value / total if total else 0
     period = next(iter(periods))
     return PortfolioSnapshot("ark", period, period, source_url, period,
                              "Official ARKK daily fund holdings", holdings,
@@ -290,15 +367,48 @@ def _date_matches(value, pattern):
         return False
 
 
-def fetch_ark_holdings() -> PortfolioSnapshot:
-    response = requests.get(ARK_URL, timeout=25)
-    response.raise_for_status()
-    soup = BeautifulSoup(response.text, "html.parser")
-    links = [urljoin(ARK_URL, a["href"]) for a in soup.select("a[href]")
-             if "ARKK" in a["href"].upper() and ".csv" in a["href"].lower()]
+def _ark_csv_links(html: str, base_url: str) -> list[str]:
+    soup = BeautifulSoup(html, "html.parser")
+    links = []
+    for anchor in soup.select("a[href]"):
+        source = urljoin(base_url, anchor["href"])
+        label = " ".join(anchor.get_text(" ", strip=True).split())
+        descriptor = f"{source} {label} {anchor.get('aria-label', '')}".upper()
+        if ".CSV" in source.upper() and "ARKK" in descriptor:
+            links.append(source)
+    return list(dict.fromkeys(links))
+
+
+def _ark_document_endpoints(html: str, base_url: str) -> list[str]:
+    paths = re.findall(r"[\"'](/api/fund/document-table/\d+)[\"']", html, flags=re.IGNORECASE)
+    return list(dict.fromkeys(urljoin(base_url, path) for path in paths))
+
+
+def fetch_ark_holdings(session=None) -> PortfolioSnapshot:
+    client = session or requests.Session()
+    client.headers.update(ARK_HEADERS)
+    links = []
+    errors = []
+    for page_url in (ARK_URL, ARK_RESOURCES_URL):
+        try:
+            response = client.get(page_url, timeout=25, allow_redirects=True)
+            response.raise_for_status()
+            links.extend(_ark_csv_links(response.text, response.url))
+            for endpoint in _ark_document_endpoints(response.text, response.url):
+                documents = client.get(endpoint, timeout=25, allow_redirects=True)
+                documents.raise_for_status()
+                links.extend(_ark_csv_links(documents.text, documents.url))
+        except requests.RequestException as exc:
+            errors.append(f"{page_url}: {type(exc).__name__}")
+        if links:
+            break
     if not links:
-        raise ValueError("Official ARKK CSV link unavailable. Open the official fund page; no substitute holdings are fabricated.")
+        detail = f" ({'; '.join(errors)})" if errors else ""
+        raise ValueError(
+            "Official ARKK CSV link unavailable from the ARKK fund page or fund resources page."
+            f"{detail} No substitute holdings are fabricated."
+        )
     source = links[0]
-    data = requests.get(source, timeout=25)
+    data = client.get(source, timeout=25, allow_redirects=True)
     data.raise_for_status()
-    return parse_ark_csv(data.text, source)
+    return parse_ark_csv(data.text, data.url)
