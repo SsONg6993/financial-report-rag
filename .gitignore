@@ -20,6 +20,7 @@ data/local/
 !data/vector_store/.gitkeep
 
 .pytest-temp/
+.e2e-runtime/
 *.db
 *.sqlite
 *.sqlite3

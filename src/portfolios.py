@@ -23,19 +23,157 @@ class Institution:
     style: str
     cik: int | None = None
     source_type: str = "SEC Form 13F"
+    manager_type: str = "institutional_manager"
+    cik_source_url: str = ""
+    website: str = ""
+    active: bool = True
+    data_quality_notes: str = ""
+    source_notes: str = ""
+
+    def __post_init__(self):
+        if self.cik:
+            if not self.cik_source_url:
+                object.__setattr__(self, "cik_source_url",
+                    f"https://www.sec.gov/edgar/browse/?CIK={self.cik}&owner=exclude")
+            if not self.source_notes:
+                object.__setattr__(self, "source_notes",
+                    "CIK and original 13F-HR filing observed in official SEC submissions on 2026-10-05.")
+            if not self.data_quality_notes:
+                object.__setattr__(self, "data_quality_notes",
+                    "13F is delayed and partial; amendments are not consolidated and positions are not current trades.")
 
 
 INSTITUTIONS = (
-    Institution("berkshire", "Berkshire Hathaway", "Warren Buffett / Berkshire Hathaway", "Quality / Value / Long-term", 1067983),
-    Institution("pershing", "Pershing Square", "Bill Ackman", "Concentrated / Activist", 1336528),
-    Institution("appaloosa", "Appaloosa Management", "David Tepper", "Active / Macro / Cyclical", 1656456),
-    Institution("bridgewater", "Bridgewater Associates", "", "Macro / Diversified", 1350694),
-    Institution("ark", "ARK Invest — ARKK", "Cathie Wood", "Innovation / Growth", source_type="Official ARKK daily fund holdings"),
-    Institution("scion", "Scion Asset Management", "Michael Burry", "Contrarian / Concentrated", 1649339),
-    Institution("duquesne", "Duquesne Family Office", "Stanley Druckenmiller", "Macro / Concentrated", 1536411),
-    Institution("soros", "Soros Fund Management", "", "Macro / Diversified", 1029160),
-    Institution("tiger", "Tiger Global", "", "Growth / Technology", 1167483),
-    Institution("coatue", "Coatue Management", "", "Growth / Technology", 1135730),
+    Institution(
+        "berkshire",
+        "Berkshire Hathaway",
+        "Warren Buffett / Berkshire Hathaway",
+        "Quality / Value / Long-term",
+        1067983,
+    ),
+    Institution(
+        "pershing", "Pershing Square", "Bill Ackman", "Concentrated / Activist", 1336528,
+        manager_type="activist",
+        data_quality_notes="Latest original 13F-HR in the recent SEC index reports Q1 2026; Q2 coverage unavailable. 13F is delayed and partial; amendments are not consolidated.",
+    ),
+    Institution(
+        "appaloosa",
+        "Appaloosa Management",
+        "David Tepper",
+        "Active / Macro / Cyclical",
+        1656456,
+        manager_type="hedge_fund",
+    ),
+    Institution(
+        "bridgewater", "Bridgewater Associates", "", "Macro / Diversified", 1350694,
+        manager_type="hedge_fund",
+    ),
+    Institution(
+        "ark",
+        "ARK Invest — ARKK",
+        "Cathie Wood",
+        "Innovation / Growth",
+        source_type="Official ARKK daily fund holdings",
+        manager_type="fund",
+        website="https://www.ark-funds.com/funds/arkk",
+        source_notes="Official ARKK fund holdings are daily fund-level disclosures, not SEC 13F.",
+        data_quality_notes="Daily holdings may lag the trading day and do not prove intraday trades.",
+    ),
+    Institution(
+        "scion",
+        "Scion Asset Management",
+        "Michael Burry",
+        "Contrarian / Concentrated",
+        1649339,
+        manager_type="hedge_fund",
+        data_quality_notes="Latest original 13F-HR in the recent SEC index reports Q3 2025; continued filing status is unconfirmed. 13F is delayed and partial.",
+    ),
+    Institution(
+        "duquesne",
+        "Duquesne Family Office",
+        "Stanley Druckenmiller",
+        "Macro / Concentrated",
+        1536411,
+        manager_type="family_office",
+    ),
+    Institution("soros", "Soros Fund Management", "", "Macro / Diversified", 1029160,
+                manager_type="family_office"),
+    Institution("tiger", "Tiger Global", "", "Growth / Technology", 1167483,
+                manager_type="hedge_fund"),
+    Institution("coatue", "Coatue Management", "", "Growth / Technology", 1135730,
+                manager_type="hedge_fund"),
+    Institution(
+        "baupost",
+        "Baupost Group LLC/MA",
+        "Seth Klarman",
+        "Value / Concentrated",
+        1061768,
+        manager_type="value_investor",
+        cik_source_url="https://www.sec.gov/edgar/browse/?CIK=1061768&owner=exclude",
+    ),
+    Institution(
+        "third-point",
+        "Third Point LLC",
+        "Daniel Loeb",
+        "Activist / Event-driven",
+        1040273,
+        manager_type="activist",
+        cik_source_url="https://www.sec.gov/edgar/browse/?CIK=1040273&owner=exclude",
+    ),
+    Institution(
+        "renaissance",
+        "Renaissance Technologies LLC",
+        "",
+        "Quant / Diversified",
+        1037389,
+        manager_type="quant_fund",
+        cik_source_url="https://www.sec.gov/edgar/browse/?CIK=1037389&owner=exclude",
+    ),
+    Institution(
+        "citadel",
+        "Citadel Advisors LLC",
+        "",
+        "Multi-strategy / Institutional",
+        1423053,
+        manager_type="hedge_fund",
+        cik_source_url="https://www.sec.gov/edgar/browse/?CIK=1423053&owner=exclude",
+    ),
+    Institution(
+        "aqr",
+        "AQR Capital Management LLC",
+        "",
+        "Quant / Multi-asset",
+        1167557,
+        manager_type="quant_fund",
+        cik_source_url="https://www.sec.gov/edgar/browse/?CIK=1167557&owner=exclude",
+    ),
+    Institution(
+        "millennium",
+        "Millennium Management LLC",
+        "",
+        "Multi-strategy / Institutional",
+        1273087,
+        manager_type="hedge_fund",
+        cik_source_url="https://www.sec.gov/edgar/browse/?CIK=1273087&owner=exclude",
+    ),
+    Institution(
+        "viking",
+        "Viking Global Investors LP",
+        "",
+        "Growth / Long-short",
+        1103804,
+        manager_type="hedge_fund",
+        cik_source_url="https://www.sec.gov/edgar/browse/?CIK=1103804&owner=exclude",
+    ),
+    Institution(
+        "lone-pine",
+        "Lone Pine Capital LLC",
+        "",
+        "Growth / Long-short",
+        1061165,
+        manager_type="hedge_fund",
+        cik_source_url="https://www.sec.gov/edgar/browse/?CIK=1061165&owner=exclude",
+    ),
 )
 BY_ID = {item.id: item for item in INSTITUTIONS}
 DISCLOSURE_NOTE = (
@@ -61,7 +199,12 @@ class Holding:
 
     @property
     def key(self):
-        return self.cusip, self.security_class.upper(), self.put_call.upper(), self.share_type.upper()
+        return (
+            self.cusip,
+            self.security_class.upper(),
+            self.put_call.upper(),
+            self.share_type.upper(),
+        )
 
 
 @dataclass
@@ -84,8 +227,10 @@ class PortfolioSnapshot:
 
 
 def _root(xml: bytes | str):
-    return etree.fromstring(xml.encode() if isinstance(xml, str) else xml,
-                            parser=etree.XMLParser(resolve_entities=False, no_network=True))
+    return etree.fromstring(
+        xml.encode() if isinstance(xml, str) else xml,
+        parser=etree.XMLParser(resolve_entities=False, no_network=True),
+    )
 
 
 def _text(node, name: str, default: str = "") -> str:
@@ -99,11 +244,21 @@ def parse_13f(xml: bytes | str, filing_date: str) -> list[Holding]:
     factor = 1000 if filing_date < "2023-01-03" else 1
     grouped: dict[tuple, Holding] = {}
     for row in root.xpath("//*[local-name()='infoTable']"):
-        item = Holding(_text(row, "nameOfIssuer"), _text(row, "titleOfClass"),
-                       _text(row, "cusip"), float(_text(row, "sshPrnamt", "0")),
-                       float(_text(row, "value", "0")) * factor,
-                       _text(row, "putCall"), _text(row, "sshPrnamtType", "SH"))
-        if not item.cusip or not item.issuer or item.shares < 0 or item.reported_value < 0:
+        item = Holding(
+            _text(row, "nameOfIssuer"),
+            _text(row, "titleOfClass"),
+            _text(row, "cusip"),
+            float(_text(row, "sshPrnamt", "0")),
+            float(_text(row, "value", "0")) * factor,
+            _text(row, "putCall"),
+            _text(row, "sshPrnamtType", "SH"),
+        )
+        if (
+            not item.cusip
+            or not item.issuer
+            or item.shares < 0
+            or item.reported_value < 0
+        ):
             raise ValueError("Invalid 13F information-table row.")
         if item.key in grouped:
             grouped[item.key].shares += item.shares
@@ -116,7 +271,9 @@ def parse_13f(xml: bytes | str, filing_date: str) -> list[Holding]:
     return sorted(grouped.values(), key=lambda row: row.reported_value, reverse=True)
 
 
-def disclosure_freshness(period: str, today: date | None = None, source_type: str = "SEC Form 13F") -> str:
+def disclosure_freshness(
+    period: str, today: date | None = None, source_type: str = "SEC Form 13F"
+) -> str:
     try:
         age = ((today or datetime.now(UTC).date()) - date.fromisoformat(period)).days
     except ValueError:
@@ -127,25 +284,62 @@ def disclosure_freshness(period: str, today: date | None = None, source_type: st
     return f"{'Stale' if age > threshold else 'Historical disclosure'} · {age} days since reporting period"
 
 
-def compare_portfolios(previous: PortfolioSnapshot, current: PortfolioSnapshot) -> list[dict]:
-    if previous.institution_id != current.institution_id or previous.source_type != current.source_type:
+def compare_portfolios(
+    previous: PortfolioSnapshot, current: PortfolioSnapshot
+) -> list[dict]:
+    if (
+        previous.institution_id != current.institution_id
+        or previous.source_type != current.source_type
+    ):
         raise ValueError("Compare the same institution and disclosure type.")
     if previous.reporting_period >= current.reporting_period:
-        raise ValueError("Portfolio comparison needs two different ordered reporting periods.")
+        raise ValueError(
+            "Portfolio comparison needs two different ordered reporting periods."
+        )
     before = {row.key: row for row in previous.holdings}
     after = {row.key: row for row in current.holdings}
     changes = []
     for key in sorted(before.keys() | after.keys()):
         old, new = before.get(key), after.get(key)
         old_shares, new_shares = old.shares if old else 0, new.shares if new else 0
-        activity = "NEW" if old is None else "EXITED" if new is None else "INCREASED" if new_shares > old_shares else "REDUCED" if new_shares < old_shares else "UNCHANGED"
+        activity = (
+            "NEW"
+            if old is None
+            else "EXITED"
+            if new is None
+            else "INCREASED"
+            if new_shares > old_shares
+            else "REDUCED"
+            if new_shares < old_shares
+            else "UNCHANGED"
+        )
         item = new or old
-        changes.append({"issuer": item.issuer, "ticker": item.ticker, "cusip": item.cusip,
-                        "security_class": item.security_class, "put_call": item.put_call,
-                        "activity": activity, "shares_before": old_shares, "shares_after": new_shares,
-                        "share_change_pct": (new_shares - old_shares) / old_shares if old_shares else None,
-                        "reporting_period": current.reporting_period, "previous_period": previous.reporting_period,
-                        "filing_date": current.filing_date, "source_url": current.source_url})
+        changes.append(
+            {
+                "issuer": item.issuer,
+                "ticker": item.ticker,
+                "cusip": item.cusip,
+                "security_class": item.security_class,
+                "put_call": item.put_call,
+                "activity": activity,
+                "shares_before": old_shares,
+                "shares_after": new_shares,
+                "share_change": new_shares - old_shares,
+                "value_before": old.reported_value if old else 0,
+                "value_after": new.reported_value if new else 0,
+                "weight_before": old.weight if old else 0,
+                "weight_after": new.weight if new else 0,
+                "weight_change": (new.weight if new else 0)
+                - (old.weight if old else 0),
+                "share_change_pct": (new_shares - old_shares) / old_shares
+                if old_shares
+                else None,
+                "reporting_period": current.reporting_period,
+                "previous_period": previous.reporting_period,
+                "filing_date": current.filing_date,
+                "source_url": current.source_url,
+            }
+        )
     return changes
 
 
@@ -160,27 +354,46 @@ class Sec13FProvider:
         return response
 
     def filings(self, institution: Institution) -> list[dict]:
-        payload = self.get(f"{SEC_DATA}/submissions/CIK{institution.cik:010d}.json").json()
+        payload = self.get(
+            f"{SEC_DATA}/submissions/CIK{institution.cik:010d}.json"
+        ).json()
         recent = payload["filings"]["recent"]
         # Include history if recent submissions contain fewer than two distinct periods.
         tables = [recent]
-        if len({recent["reportDate"][i] for i, form in enumerate(recent["form"]) if form == "13F-HR"}) < 2:
+        if (
+            len(
+                {
+                    recent["reportDate"][i]
+                    for i, form in enumerate(recent["form"])
+                    if form == "13F-HR"
+                }
+            )
+            < 2
+        ):
             for older in payload["filings"].get("files", [])[:3]:
-                tables.append(self.get(f"{SEC_DATA}/submissions/{older['name']}").json())
+                tables.append(
+                    self.get(f"{SEC_DATA}/submissions/{older['name']}").json()
+                )
         found = []
         for table in tables:
             for i, form in enumerate(table.get("form", [])):
                 if form != "13F-HR":
                     continue
-                found.append({"accession": table["accessionNumber"][i],
-                              "filing_date": table["filingDate"][i],
-                              "reporting_period": table["reportDate"][i],
-                              "document": table["primaryDocument"][i]})
+                found.append(
+                    {
+                        "accession": table["accessionNumber"][i],
+                        "filing_date": table["filingDate"][i],
+                        "reporting_period": table["reportDate"][i],
+                        "document": table["primaryDocument"][i],
+                    }
+                )
         # Amendments require explicit restatement/additional-holdings handling; do not merge blindly.
         unique = {}
         for row in sorted(found, key=lambda x: x["filing_date"], reverse=True):
             unique.setdefault(row["reporting_period"], row)
-        return sorted(unique.values(), key=lambda x: x["reporting_period"], reverse=True)
+        return sorted(
+            unique.values(), key=lambda x: x["reporting_period"], reverse=True
+        )
 
     def snapshot(self, institution: Institution, filing: dict) -> PortfolioSnapshot:
         base = f"{SEC_WWW}/Archives/edgar/data/{institution.cik}/{filing['accession'].replace('-', '')}/"
@@ -188,8 +401,15 @@ class Sec13FProvider:
         primary = self.get(urljoin(base, primary_document)).content
         root = _root(primary)
         period = _text(root, "periodOfReport")
-        if period and ("/" in period or ("-" in period and len(period.split("-")[0]) != 4)):
-            period = datetime.strptime(period, "%m-%d-%Y" if "-" in period else "%m/%d/%Y").replace(tzinfo=UTC).date().isoformat()
+        if period and (
+            "/" in period or ("-" in period and len(period.split("-")[0]) != 4)
+        ):
+            period = (
+                datetime.strptime(period, "%m-%d-%Y" if "-" in period else "%m/%d/%Y")
+                .replace(tzinfo=UTC)
+                .date()
+                .isoformat()
+            )
         if not period:
             period = filing["reporting_period"]
         listing = self.get(base + "index.json").json()["directory"]["item"]
@@ -207,9 +427,15 @@ class Sec13FProvider:
         total = sum(row.reported_value for row in holdings)
         for row in holdings:
             row.weight = row.reported_value / total if total else 0
-        return PortfolioSnapshot(institution.id, period, filing["filing_date"],
-                                 base + filing["document"], filing["accession"], holdings=holdings,
-                                 notes="Original 13F-HR; amendments are not incorporated. No licensed CUSIP-to-ticker or sector mapping is assumed.")
+        return PortfolioSnapshot(
+            institution.id,
+            period,
+            filing["filing_date"],
+            base + filing["document"],
+            filing["accession"],
+            holdings=holdings,
+            notes="Original 13F-HR; amendments are not incorporated. No licensed CUSIP-to-ticker or sector mapping is assumed.",
+        )
 
     def latest_two(self, institution: Institution) -> list[PortfolioSnapshot]:
         snapshots = []
@@ -219,7 +445,11 @@ class Sec13FProvider:
             except (requests.RequestException, ValueError, etree.XMLSyntaxError):
                 if not snapshots:
                     raise
-                snapshots[0].notes += " Previous snapshot could not be loaded; comparison unavailable."
+                snapshots[
+                    0
+                ].notes += (
+                    " Previous snapshot could not be loaded; comparison unavailable."
+                )
         return snapshots
 
     def resolve_tickers(self, snapshots: list[PortfolioSnapshot]):
@@ -293,7 +523,9 @@ def _ark_number(value: str, field_name: str) -> float:
 def _ark_date(value: str) -> str | None:
     for pattern in ("%m/%d/%Y", "%Y-%m-%d", "%m/%d/%y"):
         if _date_matches(value, pattern):
-            return datetime.strptime(value, pattern).replace(tzinfo=UTC).date().isoformat()
+            return (
+                datetime.strptime(value, pattern).replace(tzinfo=UTC).date().isoformat()
+            )
     return None
 
 
@@ -305,13 +537,17 @@ def parse_ark_csv(text: str, source_url: str) -> PortfolioSnapshot:
     for original in rows:
         row = {_ark_column(key): value for key, value in original.items() if key}
         ticker = _ark_field(row, "ticker", "symbol", "stocksymbol")
-        company = _ark_field(row, "company", "companyname", "name", "issuer", "issuername")
+        company = _ark_field(
+            row, "company", "companyname", "name", "issuer", "issuername"
+        )
         if not ticker or not company:
             continue
         fund = _ark_field(row, "fund", "fundticker", "portfolio")
         if fund and fund.upper() != "ARKK":
             continue
-        raw_date = _ark_field(row, "date", "asofdate", "holdingsdate", "portfolioasofdate")
+        raw_date = _ark_field(
+            row, "date", "asofdate", "holdingsdate", "portfolioasofdate"
+        )
         period = _ark_date(raw_date)
         if not period:
             raise ValueError("ARK holdings lack a valid as-of date.")
@@ -332,7 +568,9 @@ def parse_ark_csv(text: str, source_url: str) -> PortfolioSnapshot:
             "percentofnetassets",
         )
         if shares < 0 or market_value < 0:
-            raise ValueError("ARK holdings contain a negative share count or market value.")
+            raise ValueError(
+                "ARK holdings contain a negative share count or market value."
+            )
         periods.add(period)
         holding = Holding(
             company,
@@ -344,7 +582,11 @@ def parse_ark_csv(text: str, source_url: str) -> PortfolioSnapshot:
         )
         if raw_weight:
             reported_weight = _ark_number(raw_weight, "portfolio weight")
-            holding.weight = reported_weight / 100 if "%" in raw_weight or reported_weight > 1 else reported_weight
+            holding.weight = (
+                reported_weight / 100
+                if "%" in raw_weight or reported_weight > 1
+                else reported_weight
+            )
         holdings.append(holding)
         reported_weights.append(bool(raw_weight))
     if len(periods) != 1 or not holdings:
@@ -354,9 +596,16 @@ def parse_ark_csv(text: str, source_url: str) -> PortfolioSnapshot:
         if not has_reported_weight:
             row.weight = row.reported_value / total if total else 0
     period = next(iter(periods))
-    return PortfolioSnapshot("ark", period, period, source_url, period,
-                             "Official ARKK daily fund holdings", holdings,
-                             "ARKK only; not all ARK strategies. As-of date is the fund's holdings date, not a 13F filing date.")
+    return PortfolioSnapshot(
+        "ark",
+        period,
+        period,
+        source_url,
+        period,
+        "Official ARKK daily fund holdings",
+        holdings,
+        "ARKK only; not all ARK strategies. As-of date is the fund's holdings date, not a 13F filing date.",
+    )
 
 
 def _date_matches(value, pattern):
@@ -380,7 +629,9 @@ def _ark_csv_links(html: str, base_url: str) -> list[str]:
 
 
 def _ark_document_endpoints(html: str, base_url: str) -> list[str]:
-    paths = re.findall(r"[\"'](/api/fund/document-table/\d+)[\"']", html, flags=re.IGNORECASE)
+    paths = re.findall(
+        r"[\"'](/api/fund/document-table/\d+)[\"']", html, flags=re.IGNORECASE
+    )
     return list(dict.fromkeys(urljoin(base_url, path) for path in paths))
 
 

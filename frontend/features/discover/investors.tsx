@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import {
@@ -30,6 +31,10 @@ import {
   Section,
 } from "@/components/research-ui";
 
+function monogram(name: string) {
+  return name.split(/[\s—-]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+}
+
 function Follow({ investor }: { investor: Investor }) {
   const cache = useQueryClient();
   const m = useMutation({
@@ -57,6 +62,14 @@ function Follow({ investor }: { investor: Investor }) {
   );
 }
 export function InvestorList() {
+  const [cik, setCik] = useState("");
+  const cache = useQueryClient();
+  const resolve = useMutation({
+    mutationFn: () => api("/investors/resolve", z.object({ id: z.string(), name: z.string() }), {
+      method: "POST", body: JSON.stringify({ cik: Number(cik) }),
+    }),
+    onSuccess: () => { setCik(""); cache.invalidateQueries({ queryKey: ["investors"] }); },
+  });
   const q = useQuery({
     queryKey: ["investors"],
     queryFn: ({ signal }) =>
@@ -74,12 +87,22 @@ export function InvestorList() {
         />
       }
     >
+      <form className="mb-5 flex flex-wrap items-end gap-3" onSubmit={(event) => { event.preventDefault(); resolve.mutate(); }}>
+        <label className="text-sm">Add verified SEC 13F filer by CIK
+          <input className="mt-2 block rounded-lg border border-border bg-background px-3 py-2" inputMode="numeric"
+            pattern="[0-9]+" value={cik} onChange={(event) => setCik(event.target.value)}
+            placeholder="SEC CIK" required aria-label="SEC CIK" />
+        </label>
+        <Button type="submit" disabled={resolve.isPending}>{resolve.isPending ? "Verifying…" : "Verify filer"}</Button>
+        <span className="source">Checked only when requested; original 13F-HR required.</span>
+      </form>
+      <MutationError error={resolve.error} />
       <div className="grid-cards">
         {q.data.map((i) => (
           <article key={i.id} className="panel group flex flex-col">
             <div className="flex justify-between gap-2">
-              <span className="icon-shell">
-                <Building2 size={18} aria-hidden />
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl border border-primary/30 bg-primary/10 font-mono text-sm font-bold text-primary" aria-label={`${i.name} monogram`}>
+                {monogram(i.name)}
               </span>
               <span
                 className={
@@ -96,7 +119,7 @@ export function InvestorList() {
                 {i.name}
               </h3>
             </Link>
-            <p className="text-sm muted min-h-6 mt-1">{i.investor}</p>
+            <p className="text-sm muted min-h-6 mt-1">{i.investor ? `Associated investor · ${i.investor}` : "Institutional filer"}</p>
             <div className="flex flex-wrap gap-1 mt-4">
               {i.style_tags.map((t) => (
                 <span key={t} className="pill">
@@ -230,13 +253,15 @@ export function InvestorProfile({ id }: { id: string }) {
       <div className="hero mt-5 !py-9">
         <div className="flex flex-wrap items-start justify-between gap-7">
           <div className="max-w-3xl">
+            <span className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-primary/30 bg-primary/10 font-mono text-lg font-bold text-primary" aria-label={`${i.name} monogram`}>{monogram(i.name)}</span>
             <p className="eyebrow">
               {i.source_type === "SEC Form 13F"
                 ? "Quarterly institutional disclosure"
                 : "Daily fund holdings"}
             </p>
             <h1 className="mt-3">{i.name}</h1>
-            <p className="muted mt-2 text-base">{i.investor}</p>
+            <p className="muted mt-2 text-base">{i.investor ? `Associated investor · ${i.investor}` : "Institutional filer"}</p>
+            <p className="source">Reported position changes are attributed to the filing entity, not necessarily personal trades by an associated individual.</p>
             <div className="mt-5 flex flex-wrap gap-2">
               {i.style_tags.map((tag) => (
                 <span className="pill" key={tag}>

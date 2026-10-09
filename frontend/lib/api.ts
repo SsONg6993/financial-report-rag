@@ -100,6 +100,18 @@ export const companySchema = z.object({
   ticker: z.string(),
   available: z.boolean(),
   name: z.string(),
+  identity: z.object({
+    ticker: z.string(), cik: z.number(), name: z.string(),
+    exchange: z.string(), source_url: z.string(),
+  }).nullable().optional(),
+  availability_status: z.enum(["ready", "filings_only", "provider_error", "loading", "missing_filings", "unknown_symbol"]).optional(),
+  overview: z.object({
+    text: z.string(), source_url: z.string(), period: z.string(),
+  }).nullable().optional(),
+  filing_timeline: z.array(z.object({
+    form: z.string(), report_date: z.string(), filing_date: z.string(),
+    source_url: z.string(),
+  })).default([]),
   market: z
     .object({
       price: z.number().nullable().optional(),
@@ -200,6 +212,28 @@ export const companySchema = z.object({
   warnings: z.array(z.string()),
   watchlisted: z.boolean(),
   refresh: refreshSchema,
+});
+export const companyIdentitySchema = z.object({
+  ticker: z.string(),
+  cik: z.number(),
+  name: z.string(),
+  exchange: z.string(),
+  source_url: z.string(),
+});
+export const companySearchSchema = z.object({
+  results: z.array(companyIdentitySchema),
+  checked_at: z.string(),
+  stale: z.boolean(),
+  error: z.string().nullable(),
+});
+export const companyResolveSchema = z.object({
+  status: z.enum(["resolved", "ambiguous", "unknown", "unsupported_market", "invalid"]),
+  company: companyIdentitySchema.nullable().optional(),
+  matches: z.array(companyIdentitySchema),
+  message: z.string().nullable(),
+  checked_at: z.string().optional(),
+  stale: z.boolean().optional(),
+  error: z.string().nullable().optional(),
 });
 export const homeSchema = z.object({
   activity: z.array(

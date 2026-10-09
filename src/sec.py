@@ -41,10 +41,21 @@ def sec_session() -> requests.Session:
     return session
 
 
-def get_json(session: requests.Session, url: str) -> dict:
-    response = session.get(url, timeout=30)
-    response.raise_for_status()
-    return response.json()
+def get_json(session: requests.Session, url: str, timeout: int = 30) -> dict:
+    """Retry only transient SEC failures, with bounded backoff."""
+    for attempt in range(3):
+        try:
+            response = session.get(url, timeout=timeout)
+            response.raise_for_status()
+            return response.json()
+        except requests.HTTPError as exc:
+            if exc.response is None or exc.response.status_code not in {429, 500, 502, 503, 504} or attempt == 2:
+                raise
+        except (requests.Timeout, requests.ConnectionError):
+            if attempt == 2:
+                raise
+        time.sleep((0.5, 1.5)[attempt])
+    raise RuntimeError("Unreachable SEC retry state")
 
 
 def list_annual_filings(ticker: str) -> list[dict]:

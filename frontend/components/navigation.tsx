@@ -1,9 +1,23 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ScanSearch } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Moon, ScanSearch, Sun } from "lucide-react";
 export function Navigation() {
   const pathname = usePathname();
+  const [light, setLight] = useState(false);
+  useEffect(() => {
+    const saved = window.localStorage.getItem("thesislens-theme");
+    const enabled = saved === "light";
+    setLight(enabled);
+    document.documentElement.dataset.theme = enabled ? "light" : "dark";
+  }, []);
+  function toggleTheme() {
+    const next = !light;
+    setLight(next);
+    document.documentElement.dataset.theme = next ? "light" : "dark";
+    window.localStorage.setItem("thesislens-theme", next ? "light" : "dark");
+  }
   return (
     <header className="sticky top-0 z-40 border-b border-border/70 bg-background/88 backdrop-blur-xl">
       <div className="mx-auto flex max-w-[1200px] items-center justify-between gap-3 px-4 py-3 sm:px-8">
@@ -43,6 +57,14 @@ export function Navigation() {
             </Link>
           ))}
         </nav>
+        <button
+          type="button"
+          onClick={toggleTheme}
+          aria-label={light ? "Switch to dark mode" : "Switch to light mode"}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-primary transition hover:bg-accent"
+        >
+          {light ? <Moon size={17} aria-hidden /> : <Sun size={17} aria-hidden />}
+        </button>
       </div>
     </header>
   );

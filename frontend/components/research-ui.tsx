@@ -1,7 +1,8 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import type { z } from "zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDownRight,
@@ -21,55 +22,112 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { write, type Evidence } from "@/lib/api";
+import {
+  api,
+  companyResolveSchema,
+  companySearchSchema,
+  write,
+  type Evidence,
+} from "@/lib/api";
+
+const investorTerms: Record<string, string> = {
+  berkshire: "berkshire", buffett: "berkshire", pershing: "pershing",
+  ackman: "pershing", burry: "scion", scion: "scion", ark: "ark",
+  cathie: "ark", appaloosa: "appaloosa", tepper: "appaloosa",
+  bridgewater: "bridgewater", duquesne: "duquesne",
+  druckenmiller: "duquesne", soros: "soros", tiger: "tiger",
+  coatue: "coatue",
+};
 
 export function SearchBox() {
   const router = useRouter();
   const [error, setError] = useState("");
-  function search(form: FormData) {
-    const q = String(form.get("query") ?? "").trim();
-    const aliases: Record<string, string> = {
-      apple: "AAPL",
-      nvidia: "NVDA",
-      alphabet: "GOOGL",
-      google: "GOOGL",
-      microsoft: "MSFT",
+  const [query, setQuery] = useState("");
+  const [suggestions, setSuggestions] = useState<z.infer<typeof companySearchSchema>["results"]>([]);
+  const [searching, setSearching] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [directoryStale, setDirectoryStale] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const suggestionButtons = useRef<(HTMLButtonElement | null)[]>([]);
+
+  useEffect(() => {
+    if (query.trim().length < 2 || !showSuggestions) {
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setSearching(true);
+      try {
+        const data = await api(
+          "/companies/search?q=" + encodeURIComponent(query.trim()),
+          companySearchSchema,
+          { signal: controller.signal },
+        );
+        setSuggestions(data.results);
+        setDirectoryStale(data.stale);
+      } catch {
+        if (!controller.signal.aborted) {
+          setSuggestions([]);
+          setError("Company directory is temporarily unavailable. Your saved research is unaffected.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setSearching(false);
+      }
+    }, 250);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
     };
-    const investors: Record<string, string> = {
-      berkshire: "berkshire",
-      buffett: "berkshire",
-      pershing: "pershing",
-      ackman: "pershing",
-      burry: "scion",
-      scion: "scion",
-      ark: "ark",
-      cathie: "ark",
-      appaloosa: "appaloosa",
-      tepper: "appaloosa",
-      bridgewater: "bridgewater",
-      duquesne: "duquesne",
-      druckenmiller: "duquesne",
-      soros: "soros",
-      tiger: "tiger",
-      coatue: "coatue",
-    };
-    const investor = Object.keys(investors).find((k) =>
-      q.toLowerCase().includes(k),
+  }, [query, showSuggestions]);
+
+  async function search(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const q = query.trim();
+    if (!q) return;
+    const investor = Object.keys(investorTerms).find((term) =>
+      q.toLowerCase() === term,
     );
     if (investor) {
-      router.push("/discover/" + investors[investor]);
+      router.push("/discover/" + investorTerms[investor]);
       return;
     }
-    const ticker = aliases[q.toLowerCase()] ?? q.toUpperCase();
-    if (!/^[A-Z0-9.-]{1,12}$/.test(ticker)) {
-      setError("Try a ticker such as AAPL, or an investor such as Berkshire.");
-      return;
-    }
+    setSubmitting(true);
     setError("");
+    try {
+      const result = await api(
+        "/companies/resolve?q=" + encodeURIComponent(q),
+        companyResolveSchema,
+      );
+      setDirectoryStale(Boolean(result.stale));
+      if (result.status === "resolved" && result.company) {
+        setShowSuggestions(false);
+        router.push("/research/" + result.company.ticker);
+      } else {
+        setSuggestions(result.matches);
+        setShowSuggestions(true);
+        setError(result.message ?? "Select a specific company listing.");
+      }
+    } catch {
+      setError("SEC company lookup is unavailable. Retry shortly; saved research is unaffected.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+  function choose(ticker: string) {
+    setQuery(ticker);
+    setError("");
+    setShowSuggestions(false);
     router.push("/research/" + ticker);
   }
+  function onInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "ArrowDown" && suggestions.length) {
+      event.preventDefault();
+      suggestionButtons.current[0]?.focus();
+    }
+    if (event.key === "Escape") setShowSuggestions(false);
+  }
   return (
-    <form action={search} className="mt-7 max-w-2xl">
+    <form onSubmit={search} className="relative mt-7 max-w-2xl" role="search">
       <label htmlFor="company-search" className="sr-only">
         Search companies, investors, or tickers
       </label>
@@ -82,16 +140,52 @@ export function SearchBox() {
         <input
           id="company-search"
           name="query"
+          value={query}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setError("");
+            setShowSuggestions(true);
+          }}
+          onKeyDown={onInputKeyDown}
+          aria-describedby={error ? "company-search-error" : undefined}
           autoComplete="off"
           spellCheck={false}
           required
           placeholder="Search companies, investors, or tickers…"
           className="w-full !border-0 !bg-transparent !p-2 !shadow-none"
         />
-        <Button type="submit">Explore</Button>
+        <Button type="submit" disabled={submitting}>
+          {submitting ? "Finding…" : "Explore"}
+        </Button>
       </div>
+      {showSuggestions && query.trim().length >= 2 && (
+        <div className="absolute z-30 mt-2 w-full overflow-hidden rounded-2xl border border-border bg-card p-2 shadow-2xl" aria-label="Company suggestions">
+          {searching && <p className="px-3 py-2 text-sm muted">Searching the SEC directory…</p>}
+          {!searching && suggestions.length === 0 && !error && (
+            <p className="px-3 py-2 text-sm muted">No SEC company suggestion yet.</p>
+          )}
+          {suggestions.map((item, index) => (
+            <button
+              key={item.ticker + item.cik}
+              ref={(node) => { suggestionButtons.current[index] = node; }}
+              type="button"
+              onClick={() => choose(item.ticker)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") setShowSuggestions(false);
+                if (event.key === "ArrowDown") suggestionButtons.current[index + 1]?.focus();
+                if (event.key === "ArrowUp") suggestionButtons.current[index - 1]?.focus();
+              }}
+              className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left hover:bg-accent focus-visible:bg-accent"
+            >
+              <span className="min-w-0"><strong className="block truncate text-sm">{item.name}</strong><span className="text-xs muted">{item.exchange || "Exchange not listed"}</span></span>
+              <span className="rounded-lg border border-border px-2 py-1 text-xs text-primary">{item.ticker}</span>
+            </button>
+          ))}
+          {directoryStale && <p className="px-3 py-2 text-xs text-amber-300">Using the last verified SEC directory; refresh is temporarily unavailable.</p>}
+        </div>
+      )}
       {error && (
-        <p role="alert" className="mt-2 text-sm text-destructive">
+        <p id="company-search-error" role="alert" className="mt-2 text-sm text-destructive">
           {error}
         </p>
       )}

@@ -18,7 +18,7 @@ from backend.models import (
     Thesis,
 )
 from backend.service import ResearchService
-from src.portfolios import BY_ID
+from src.company_directory import CompanyDirectory
 from src.sec import normalize_ticker
 from src.thesis import RULE_METRICS
 
@@ -28,6 +28,7 @@ app = FastAPI(
     description="Local, single-user investment research. Public disclosures are research inputs, not trading instructions.",
 )
 service = ResearchService()
+company_directory = CompanyDirectory()
 
 
 class Rule(BaseModel):
@@ -80,7 +81,7 @@ def valid_ticker(ticker):
 
 
 def valid_investor(key):
-    if key not in BY_ID:
+    if service.registry.get(key) is None:
         raise HTTPException(404, "Investor not found")
     return key
 
@@ -93,7 +94,7 @@ def health():
 @app.get("/api/home/feed", response_model=Feed)
 def home(background: BackgroundTasks):
     for key in service.store.follows():
-        if key in BY_ID:
+        if service.registry.get(key) is not None:
             service.schedule(background, "ark" if key == "ark" else "portfolio", key)
     for ticker in service.store.watchlist():
         for kind in ("company", "market", "insiders", "ownership"):
@@ -104,6 +105,63 @@ def home(background: BackgroundTasks):
 @app.get("/api/investors", response_model=list[Investor])
 def investors():
     return service.investors()
+
+
+@app.get("/api/companies/search")
+def search_companies(q: str = ""):
+    if len(q) > 100:
+        raise HTTPException(422, "Search is too long")
+    try:
+        return company_directory.search(q)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+@app.get("/api/companies/resolve")
+def resolve_company(q: str):
+    if len(q) > 100:
+        raise HTTPException(422, "Search is too long")
+    try:
+        return company_directory.resolve(q)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+class ResolveManager(BaseModel):
+    cik: int = Field(ge=1, le=9_999_999_999)
+
+
+@app.get("/api/investors/search")
+def search_investors(q: str = ""):
+    return [
+        {
+            "id": item.id,
+            "name": item.name,
+            "cik": item.cik,
+            "manager_type": item.manager_type,
+            "source_url": item.cik_source_url,
+        }
+        for item in service.registry.search(q)
+    ]
+
+
+@app.post("/api/investors/resolve", status_code=201)
+def resolve_investor(data: ResolveManager):
+    """Only explicit user-selected CIKs are checked against public SEC filings."""
+    try:
+        item = service.registry.resolve_cik(data.cik)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except Exception as exc:  # SEC source boundary; surface a typed unavailable response.
+        raise HTTPException(
+            503, f"SEC resolution unavailable: {type(exc).__name__}"
+        ) from exc
+    return {
+        "id": item.id,
+        "name": item.name,
+        "cik": item.cik,
+        "source_url": item.cik_source_url,
+    }
 
 
 @app.get("/api/investors/{key}", response_model=Investor)
@@ -236,7 +294,10 @@ def disclosures():
 
 @app.post("/api/ask", response_model=Answer)
 def ask(data: AskInput, background: BackgroundTasks):
-    if any(word in data.question.lower() for word in ("news", "macro", "market pulse", "oil prices")):
+    if any(
+        word in data.question.lower()
+        for word in ("news", "macro", "market pulse", "oil prices")
+    ):
         service.market_pulse.schedule(background)
     return service.ask(data.question.strip(), valid_ticker(data.ticker))
 
@@ -251,7 +312,12 @@ def market_pulse(background: BackgroundTasks):
 def market_pulse_watchlist(background: BackgroundTasks):
     service.market_pulse.schedule(background)
     feed = service.market_pulse.feed()
-    return {**feed, "events": [e for e in feed["events"] if e["watchlist_relevant"] and e["recent"]]}
+    return {
+        **feed,
+        "events": [
+            e for e in feed["events"] if e["watchlist_relevant"] and e["recent"]
+        ],
+    }
 
 
 @app.post("/api/market-pulse/refresh", status_code=202)
@@ -271,6 +337,68 @@ def market_pulse_detail(event_id: str):
 @app.get("/api/market-pulse/{event_id}/impacts")
 def market_pulse_impacts(event_id: str):
     return {"impacts": market_pulse_detail(event_id)["impacts"]}
+
+
+@app.get("/api/intelligence/feed")
+def intelligence_feed(category: str = "all", limit: int = 50):
+    try:
+        return service.intelligence.feed(category, limit)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/api/intelligence/company/{ticker}")
+def institutional_activity(ticker: str):
+    return service.intelligence.company_activity(valid_ticker(ticker))
+
+
+@app.get("/api/intelligence/daily-brief")
+def intelligence_daily_brief():
+    return service.intelligence.daily_brief()
+
+
+@app.get("/api/intelligence/outbox")
+def intelligence_outbox():
+    return {"notifications": service.store.notifications(),
+            "note": "Local queue; external delivery is optional and disabled by default."}
+
+
+@app.get("/api/intelligence/sources")
+def public_sources():
+    followed = set(service.store.source_follows())
+    sources = [{"id": item.id, "name": item.name, "source_url": item.url,
+                "followed": item.id in followed,
+                "checked_at": service.market_pulse.state(item).get("checked_at"),
+                "error": service.market_pulse.state(item).get("error")}
+               for item in service.market_pulse.providers]
+    sources.append({"id": "berkshire-letters", "name": "Berkshire shareholder letters",
+                    "source_url": service.public_providers["website"].URL,
+                    "followed": "berkshire-letters" in followed,
+                    "checked_at": None, "error": "Year-only index; no dated feed events"})
+    return {"sources": sources,
+            "note": "Official public sources only. X/Twitter is disabled."}
+
+
+@app.put("/api/intelligence/sources/{source_id}/follow")
+def follow_public_source(source_id: str, data: Toggle):
+    if not any(provider.resolve_source(source_id) for provider in service.public_providers.values()):
+        raise HTTPException(404, "Unsupported public source")
+    service.store.follow_source(source_id, data.enabled)
+    return {"source_id": source_id, "followed": data.enabled}
+
+
+@app.put("/api/intelligence/events/{event_id}/read")
+def intelligence_mark_read(event_id: str):
+    if not service.store.mark_intelligence_read(event_id):
+        raise HTTPException(404, "Event not found")
+    return {"event_id": event_id, "read": True}
+
+
+@app.put("/api/intelligence/events/{event_id}/dismiss")
+def intelligence_dismiss(event_id: str):
+    if not service.store.dismiss_notification(event_id):
+        raise HTTPException(404, "Event not found")
+    return {"event_id": event_id, "dismissed": True}
 
 
 # Keep the existing catch-all disclosure route after the specific Pulse routes.

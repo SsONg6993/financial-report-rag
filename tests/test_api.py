@@ -8,10 +8,44 @@ from backend.disclosures import parse_form4, parse_ownership
 from backend.quarterly import quarter_facts, quarterly_changes
 from backend.service import ResearchService
 from backend.tickers import cover_class_tickers
-from src.local_store import LocalStore
+from src.company_directory import CompanyIdentity
+from src.local_store import LocalStore, utc_now
 from src.models import AnnualFinancials
-from src.portfolios import Holding, PortfolioSnapshot
+from src.portfolios import INSTITUTIONS, Holding, PortfolioSnapshot
 from src.thesis import serialize_financials
+
+
+def test_company_identity_api_contract(client, monkeypatch):
+    entries = [
+        CompanyIdentity("TSLA", 1318605, "Tesla, Inc.", "Nasdaq"),
+        CompanyIdentity("KEYS", 1601046, "Keysight Technologies, Inc.", "NYSE"),
+    ]
+    monkeypatch.setattr(main.company_directory, "load", lambda refresh=False: (
+        entries, {"checked_at": "2026-10-09T00:00:00+00:00", "stale": False, "error": None}
+    ))
+    suggestions = client.get("/api/companies/search", params={"q": "keysight"})
+    assert suggestions.status_code == 200
+    assert suggestions.json()["results"][0]["ticker"] == "KEYS"
+    resolved = client.get("/api/companies/resolve", params={"q": "Tesla"})
+    assert resolved.status_code == 200
+    assert resolved.json()["company"]["ticker"] == "TSLA"
+    unknown = client.get("/api/companies/resolve", params={"q": "INVALIDCO"})
+    assert unknown.json()["status"] == "unknown"
+
+
+def test_direct_company_page_distinguishes_unknown_symbol_from_provider_error(client):
+    for ticker, error, expected in (
+        ("TESLA", "RuntimeError: SEC filing list unavailable: Ticker TESLA was not found in the SEC ticker list.", "unknown_symbol"),
+        ("KEYS", "Timeout: SEC temporarily unavailable", "provider_error"),
+        ("EMPTY", "RuntimeError: No supported SEC filings or facts available", "missing_filings"),
+    ):
+        main.service.store.save_snapshot(
+            "refresh", f"company:{ticker}", "current",
+            {"checked_at": utc_now(), "error": error, "warnings": []},
+        )
+        response = client.get(f"/api/company/{ticker}")
+        assert response.status_code == 200
+        assert response.json()["availability_status"] == expected
 
 
 @pytest.fixture
@@ -80,7 +114,7 @@ def test_feed_source_dates_and_valid_share_change(client):
     assert data["activity"][0]["pct_change"] == -0.1
     assert data["activity"][0]["reporting_period"] == "2025-06-30"
     assert data["activity"][0]["filing_date"] == "2025-08-14"
-    assert len(data["investors"]) == 10
+    assert len(data["investors"]) == len(INSTITUTIONS)
 
 
 def test_missing_sources_are_not_filled(client):

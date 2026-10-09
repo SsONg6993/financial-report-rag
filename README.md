@@ -38,6 +38,18 @@ npm.cmd run dev
 
 Open http://localhost:3000. Production verification: `npm.cmd run build`, then `npm.cmd run start`. Set server-side `API_URL` only if the backend is not at `http://127.0.0.1:8000`. No API credentials belong in `NEXT_PUBLIC_*` variables.
 
+### Public-source intelligence (incremental V2)
+
+The existing research product now also has an additive tracked-entity registry (18 featured managers/funds and explicit on-demand SEC CIK verification), source-cited normalized events, a personalized Intelligence Feed, comparable cached 13F activity in Research, and a dated daily brief. ARKK's daily fund holdings are compared separately from quarterly 13F; neither is a real-time trade signal. Follow official RSS sources from the feed. The enabled free providers reuse the existing official RSS and SEC caches; Berkshire's official letter index exposes year-only documents but does not fabricate publication dates or treat them as fresh updates. X/Twitter and paid APIs are disabled/unneeded.
+
+The local notification outbox needs no credentials. For an explicit due RSS refresh and cache materialization, run `.\.venv\Scripts\python.exe -m backend.refresh --public-updates --intelligence` from the repository root. For one optional Telegram or self-hosted ntfy delivery attempt, run `.\.venv\Scripts\python.exe -m backend.refresh --notifications`. Use `--notification-dry-run` to preview Telegram, ntfy, and Hermes-consumer messages without credentials, network calls, or outbox changes. See [Hermes and notifications](docs/hermes-integration.md) for setup and security boundaries. These commands do not crawl all managers.
+
+Playwright E2E is isolated: `cd frontend; npm run test:e2e` starts dedicated localhost servers, forces offline mode, initializes/migrates a synthetic database at `.e2e-runtime/thesislens-e2e.sqlite3`, and replaces **only that guarded test database** at the start of each run. The browser tests never connect to `data/local/thesislens.sqlite3`; external QA URLs and a personal `THESISLENS_DB` are rejected before startup. `.e2e-runtime/`, screenshots, browser traces, generated caches, and `.env` are ignored. The fixture contains synthetic public-research data—not copied personal records. Do not guess or restore any user records changed by earlier browser runs.
+
+SQLite V2 migration is additive and transactional. Before upgrading a personal database, stop both app servers and make a dated copy of `data/local/thesislens.sqlite3` to a private backup outside the repository. Do not overwrite the source database if an upgrade fails; preserve it and the backup for diagnosis. Migration tests cover clean install, V1 watchlist/follows/theses/evaluations preservation, idempotence, and rollback on schema conflict.
+
+Company search uses the free [SEC ticker/CIK/exchange directory](https://www.sec.gov/files/company_tickers_exchange.json), cached for 24 hours at `data/cache/company_directory.json`. Search by exact ticker or company name, inspect autocomplete suggestions, and explicitly choose between multiple share classes. The directory is separate from filings and financial facts: an identified company can still have missing or temporarily unavailable research. A failed directory refresh keeps the last validated directory with a stale label. `BRK.B` resolves to the SEC listing `BRK-B`; non-US exchange suffixes such as `.TO` are not silently treated as US tickers. No paid search service or credential is required. The UI defaults to dark mode; its optional light-mode choice is saved in this browser.
+
 ### Product API
 
 | Method | Endpoint | Purpose |
@@ -46,6 +58,7 @@ Open http://localhost:3000. Production verification: `npm.cmd run build`, then `
 | GET | `/api/investors/{id}`, `/holdings`, `/changes` | Profile, reported positions, deterministic share changes |
 | PUT | `/api/investors/{id}/follow` | Persist followed institution |
 | GET | `/api/company/{ticker}`, `/changes`, `/suggested-theses`, `/theses` | Company research and evidence |
+| GET | `/api/companies/search?q=`, `/api/companies/resolve?q=` | Validated SEC identity suggestions and explicit resolution |
 | PUT | `/api/company/{ticker}/watch` | Persist watchlist |
 | PUT | `/api/company/{ticker}/suggestions/{suggestion_id}/ignore` | Persist ignored suggestion (set `enabled:false` to restore) |
 | POST / PUT | `/api/theses`, `/api/theses/{id}` | Track/edit a thesis |
@@ -110,7 +123,7 @@ npx.cmd playwright install chromium
 npm.cmd run test:e2e
 ```
 
-E2E expects a production frontend on port 3000 and a cached QA backend on port 8000. Enable the optional live Zod contract tests with `$env:LIVE_API='true'` before `npm.cmd test`. The installed React/Next/TypeScript/Tailwind/shadcn/TanStack/Zod/UI/Playwright skills shaped component boundaries, validation, cache policies, keyboard access and production-mode QA. The TypeSafe skill required live API/Choice/citation guidance before reusing Jev judgments.
+E2E starts its own isolated backend on port 18765 and frontend on port 13000; it does not use the personal database or the normal development servers. Enable the optional live Zod contract tests against a separately running local backend with `$env:LIVE_API='true'` before `npm.cmd test`. The installed React/Next/TypeScript/Tailwind/shadcn/TanStack/Zod/UI/Playwright skills shaped component boundaries, validation, cache policies, keyboard access and browser QA. The TypeSafe skill required live API/Choice/citation guidance before reusing Jev judgments.
 
 ## Internal/debug Streamlit workspace (retained)
 
