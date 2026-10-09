@@ -137,6 +137,33 @@ def test_empty_stale_and_mixed_disclosure_datasets_are_explicit():
     assert any(
         "No eligible stored snapshot" in note for note in result["coverage_notes"]
     )
+    assert result["pairwise"][0] == {
+        "left": "berkshire",
+        "right": "ark",
+        "comparable": False,
+        "shared_count": None,
+        "jaccard": None,
+        "weight_overlap": None,
+    }
+
+
+def test_history_uses_only_real_stored_snapshots():
+    data = {
+        "berkshire": [
+            snapshot("berkshire", "2026-06-30", [holding("A", "AAPL", 0.4)]),
+            snapshot("berkshire", "2026-03-31", [holding("B", "KO", 0.2)]),
+        ],
+        "pershing": [
+            snapshot("pershing", "2026-06-30", [holding("C", "GOOG", 0.3)])
+        ],
+    }
+    result = analyze_overlap(data)
+    assert [(row["institution_id"], row["reporting_period"]) for row in result["history"]] == [
+        ("berkshire", "2026-06-30"),
+        ("berkshire", "2026-03-31"),
+        ("pershing", "2026-06-30"),
+    ]
+    assert result["history"][0]["top_five_weight"] == 0.4
 
 
 def test_selection_limits_are_enforced():

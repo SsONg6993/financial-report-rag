@@ -98,6 +98,19 @@ def analyze_overlap(
     pairwise = []
     for index, left in enumerate(ordered_ids):
         for right in ordered_ids[index + 1 :]:
+            comparable = left in maps and right in maps
+            if not comparable:
+                pairwise.append(
+                    {
+                        "left": left,
+                        "right": right,
+                        "comparable": False,
+                        "shared_count": None,
+                        "jaccard": None,
+                        "weight_overlap": None,
+                    }
+                )
+                continue
             left_set, right_set = set(maps.get(left, {})), set(maps.get(right, {}))
             pair_union = left_set | right_set
             pair_shared = left_set & right_set
@@ -105,6 +118,7 @@ def analyze_overlap(
                 {
                     "left": left,
                     "right": right,
+                    "comparable": True,
                     "shared_count": len(pair_shared),
                     "jaccard": len(pair_shared) / len(pair_union)
                     if pair_union
@@ -113,6 +127,31 @@ def analyze_overlap(
                         min(maps[left][identity].weight, maps[right][identity].weight)
                         for identity in pair_shared
                     ),
+                }
+            )
+
+    history_rows = []
+    for institution_id in ordered_ids:
+        institution = BY_ID.get(institution_id)
+        for snapshot in snapshots_by_institution[institution_id][:8]:
+            mapped = _holding_map(snapshot)
+            weights = sorted(
+                (holding.weight for holding in mapped.values()), reverse=True
+            )
+            history_rows.append(
+                {
+                    "institution_id": institution_id,
+                    "institution_name": institution.name
+                    if institution
+                    else institution_id,
+                    "reporting_period": snapshot.reporting_period,
+                    "source_type": snapshot.source_type,
+                    "holding_count": len(snapshot.holdings),
+                    "mapped_count": len(mapped),
+                    "disclosed_value_total": sum(
+                        holding.reported_value for holding in snapshot.holdings
+                    ),
+                    "top_five_weight": sum(weights[:5]),
                 }
             )
 
@@ -272,6 +311,7 @@ def analyze_overlap(
             "weight_overlap": weight_overlap,
         },
         "pairwise": pairwise,
+        "history": history_rows,
         "changes": changes,
         "coverage_notes": coverage_notes,
     }
