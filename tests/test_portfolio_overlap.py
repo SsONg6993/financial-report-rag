@@ -146,3 +146,34 @@ def test_selection_limits_are_enforced():
         assert "2 and 5" in str(exc)
     else:
         raise AssertionError("Expected selection validation")
+
+
+def test_missing_snapshot_is_not_reported_as_zero_similarity():
+    result = analyze_overlap({
+        "berkshire": [],
+        "pershing": [snapshot("pershing", "2026-06-30", [holding("A", "AAPL", 0.4)])],
+    })
+    assert result["summary"]["jaccard"] is None
+    assert result["summary"]["weight_overlap"] is None
+    assert result["pairwise"][0]["jaccard"] is None
+    assert result["pairwise"][0]["weight_overlap"] is None
+
+
+def test_unsorted_snapshots_select_latest_and_compare_previous():
+    old = snapshot("berkshire", "2026-03-31", [holding("A", "AAPL", 0.3, 100)])
+    new = snapshot("berkshire", "2026-06-30", [holding("A", "AAPL", 0.4, 120)])
+    result = analyze_overlap({
+        "berkshire": [old, new],
+        "pershing": [snapshot("pershing", "2026-06-30", [holding("A", "AAPL", 0.2)])],
+    })
+    assert result["institutions"][0]["reporting_period"] == "2026-06-30"
+    assert result["changes"][0]["activity"] == "INCREASED"
+
+
+def test_no_mapped_securities_has_undefined_similarity():
+    result = analyze_overlap({
+        "berkshire": [snapshot("berkshire", "2026-06-30", [])],
+        "pershing": [snapshot("pershing", "2026-06-30", [])],
+    })
+    assert result["summary"]["jaccard"] is None
+    assert result["summary"]["weight_overlap"] is None
