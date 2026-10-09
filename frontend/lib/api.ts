@@ -144,8 +144,8 @@ export const portfolioOverlapSchema = z.object({
     common_count: z.number(),
     shared_count: z.number(),
     union_count: z.number(),
-    jaccard: z.number(),
-    weight_overlap: z.number(),
+    jaccard: z.number().nullable(),
+    weight_overlap: z.number().nullable(),
   }),
   pairwise: z.array(
     z.object({

@@ -689,10 +689,17 @@ export function PortfolioNetwork() {
                   "Combined universe",
                   overlap.data.summary.union_count.toString(),
                 ],
-                ["Jaccard", percent(overlap.data.summary.jaccard)],
+                [
+                  "Jaccard",
+                  overlap.data.summary.jaccard == null
+                    ? "N/A"
+                    : percent(overlap.data.summary.jaccard),
+                ],
                 [
                   "Weight overlap",
-                  percent(overlap.data.summary.weight_overlap),
+                  overlap.data.summary.weight_overlap == null
+                    ? "N/A"
+                    : percent(overlap.data.summary.weight_overlap),
                 ],
               ].map(([label, value]) => (
                 <div className="panel !p-4" key={label}>
