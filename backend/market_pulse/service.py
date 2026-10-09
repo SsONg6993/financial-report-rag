@@ -220,7 +220,9 @@ class MarketPulseService:
     def portfolio_map(self):
         result = {}
         for key in self.store.follows():
-            if key not in BY_ID:
+            registry = getattr(self.research, "registry", None)
+            institution = registry.get(key) if registry else BY_ID.get(key)
+            if institution is None:
                 continue
             snapshots = self.research.portfolios(key)  # Cache only, never SEC refresh.
             if not snapshots:
@@ -232,7 +234,7 @@ class MarketPulseService:
                 result.setdefault(holding.ticker, []).append(
                     {
                         "investor_id": key,
-                        "investor": BY_ID[key].name,
+                        "investor": institution.name,
                         "reporting_period": latest.reporting_period,
                         "filing_date": latest.filing_date,
                         "source_url": latest.source_url,
@@ -476,8 +478,14 @@ class MarketPulseService:
                 break
         if "airline" in query:
             ticker = "DAL"
+        registry = getattr(self.research, "registry", None)
         named_investor = next(
-            (key for key in self.store.follows() if key in BY_ID and key in query), None
+            (
+                key
+                for key in self.store.follows()
+                if (registry.get(key) if registry else BY_ID.get(key)) and key in query
+            ),
+            None,
         )
         feed = self.feed()
         watchlist = "watchlist" in query

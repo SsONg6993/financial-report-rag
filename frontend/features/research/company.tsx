@@ -400,6 +400,9 @@ export function CompanyResearch({ ticker }: { ticker: string }) {
   const context = c.financial_context;
   const quarterly = context?.kind === "quarterly";
   const revenue = context?.metrics.find((m) => m.metric === "revenue");
+  const comparableRevenue =
+    revenue?.value != null && revenue.previous != null &&
+    revenue.value > 0 && revenue.previous > 0 ? revenue : null;
   const income = context?.metrics.find((m) => m.metric === "net_income");
   const fcfMargin =
     !quarterly && a?.revenue && a.free_cash_flow != null
@@ -433,12 +436,17 @@ export function CompanyResearch({ ticker }: { ticker: string }) {
         <div className="flex flex-wrap items-start justify-between gap-7">
           <div className="max-w-3xl">
             <div className="flex items-center gap-3">
-              <span className="icon-shell">
-                <Building2 size={20} aria-hidden />
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-primary/30 bg-primary/10 font-mono text-sm font-bold text-primary" aria-label={`${ticker} monogram`}>
+                {ticker.slice(0, 2)}
               </span>
               <p className="eyebrow">Company research · {ticker}</p>
             </div>
             <h1 className="mt-4">{c.name}</h1>
+            <p className="source mt-2">
+              {ticker}{c.identity?.exchange ? ` · ${c.identity.exchange}` : ""}
+              {" · "}{c.refresh.error ? "Saved evidence · source refresh failed" : c.available ? "Verified research available" : c.availability_status === "loading" ? "Loading official sources" : "Financial evidence unavailable"}
+              {c.identity?.source_url && <> · <a href={c.identity.source_url} target="_blank" rel="noopener noreferrer">SEC identity source ↗</a></>}
+            </p>
             <p className="muted mt-3 max-w-2xl">
               {c.radar[0]?.text ??
                 "A clean workspace for testing the business evidence behind this company."}
@@ -509,8 +517,13 @@ export function CompanyResearch({ ticker }: { ticker: string }) {
           />
           <h2>Research is still taking shape</h2>
           <p className="mt-3">
-            Verified financial facts are not available yet, so ThesisLens is
-            keeping the page useful without filling gaps with estimates.
+            {c.availability_status === "loading"
+              ? "Official filings are being checked. This page will remain available while the background refresh runs."
+              : c.availability_status === "provider_error"
+                ? "The source check failed. No verified financial data is being invented; try again after the provider recovers."
+                : c.availability_status === "unknown_symbol"
+                  ? "This ticker is not in the current SEC company directory. Check the symbol or use the company search above."
+                : "No supported filing facts are saved for this symbol yet. This is not a claim that the company has no filings."}
           </p>
           <Button className="mt-4" onClick={() => q.refetch()}>
             Check again
@@ -527,6 +540,34 @@ export function CompanyResearch({ ticker }: { ticker: string }) {
           <p className="source">{c.refresh.error}</p>
         </div>
       )}
+      <Section title="Business & filing evidence">
+        <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
+          <article className="panel">
+            <h3>Business overview</h3>
+            {c.overview ? (
+              <>
+                <p className="muted mt-3 text-sm leading-6">{c.overview.text}</p>
+                <p className="source mt-3">SEC filing excerpt · {c.overview.period || "Period not listed"} · <a href={c.overview.source_url} target="_blank" rel="noopener noreferrer">Read source ↗</a></p>
+              </>
+            ) : (
+              <p className="muted mt-3 text-sm">A sourced business overview is not cached. Open the original filing rather than relying on an unsourced summary.</p>
+            )}
+          </article>
+          <article className="panel">
+            <h3>Recent SEC filings</h3>
+            {c.filing_timeline.length ? (
+              <ul className="mt-3 space-y-3">
+                {c.filing_timeline.slice(0, 4).map((filing) => (
+                  <li key={filing.source_url} className="border-b border-border/60 pb-3 last:border-0">
+                    <a className="font-medium text-primary" href={filing.source_url} target="_blank" rel="noopener noreferrer">{filing.form} ↗</a>
+                    <p className="source !mt-1">Period {filing.report_date || "unavailable"} · Filed {filing.filing_date}</p>
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="muted mt-3 text-sm">No verified filing timeline is cached yet.</p>}
+          </article>
+        </div>
+      </Section>
       <Section title="Why It Matters">
         <div className="grid-cards">
           <article className="panel">
@@ -614,6 +655,22 @@ export function CompanyResearch({ ticker }: { ticker: string }) {
         {context && (
           <div className="panel mb-5">
             <h3>Numbers That Matter</h3>
+            {comparableRevenue && (
+              <div className="mt-4 rounded-xl border border-border/70 bg-background/30 p-4" role="img" aria-label={`Revenue comparison: ${comparableRevenue.period} ${money(comparableRevenue.value)}, previous ${comparableRevenue.previous_period} ${money(comparableRevenue.previous)}`}>
+                <p className="text-sm font-medium">Comparable revenue</p>
+                {[
+                  { period: comparableRevenue.previous_period ?? "Prior period", value: comparableRevenue.previous ?? 0, color: "bg-sky-500" },
+                  { period: comparableRevenue.period, value: comparableRevenue.value ?? 0, color: "bg-primary" },
+                ].map((bar) => (
+                  <div key={bar.period} className="mt-3 grid grid-cols-[minmax(5rem,8rem)_1fr_auto] items-center gap-3 text-xs">
+                    <span className="truncate">{bar.period}</span>
+                    <span className="h-2 overflow-hidden rounded-full bg-muted"><span className={`block h-full rounded-full ${bar.color}`} style={{ width: `${Math.max(2, bar.value / Math.max(comparableRevenue.value ?? 0, comparableRevenue.previous ?? 0) * 100)}%` }} /></span>
+                    <span className="font-mono">{money(bar.value)}</span>
+                  </div>
+                ))}
+                <a className="source mt-3 block" href={comparableRevenue.source_url} target="_blank" rel="noopener noreferrer">SEC facts ↗</a>
+              </div>
+            )}
             <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {context.metrics.map((m) => (
                 <div

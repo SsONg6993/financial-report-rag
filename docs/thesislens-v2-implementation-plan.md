@@ -1,0 +1,73 @@
+# ThesisLens V2 — public-source investor intelligence plan
+
+Status: implementation plan, not a claim that V2 features below are already shipped. This updates the supplied Institutional & Influential Investor Intelligence proposal with a non-negotiable constraint: **zero mandatory paid data, social, market, or notification APIs**. Keep the existing Next.js/FastAPI application and local-first research workflow; extend it incrementally. Do not delete SEC retrieval, Ask/RAG, financial facts, thesis monitoring, Market Pulse, tests, or local user data.
+
+## Product and cost contract
+
+ThesisLens is the source-of-truth engine for public disclosures and public statements. Hermes may be an optional personal-agent and notification consumer, not the calculator or database owner. The product must be useful with no X account, no paid API key, no Hermes installation, and no hosted LLM. Local Ollama or deterministic/extractive fallback remains sufficient for summaries; the existing optional Jev integration is not a V2 dependency and stays disabled by default.
+
+The V2 acceptance gate is a clean local installation with only a compliant SEC contact user-agent, network access to permitted public sources, and local storage. Following investors and companies, viewing dated positions and changes, receiving a personalized feed, building a daily brief, and using local notification paths must not require payment credentials. Self-hosting hardware, internet access, or optional third-party hosting can have real-world costs; “zero paid data sources” means no mandatory metered provider/API charges. Never silently fall back to a paid endpoint, trial quota, or scraping that violates a source's terms. Every new provider needs a source/permission, rate-limit, provenance, and failure-state review before enabling it.
+
+## Reuse before adding
+
+The current repository already has `src/portfolios.py` (curated 13F managers, official ARKK daily holdings, portfolio comparison), `src/sec.py`, `backend/disclosures.py` (Form 4 and Schedule 13D/G), `src/local_store.py` (SQLite watchlist, follows, theses, dated snapshots), `backend/service.py` (cached refresh orchestration), `backend/market_pulse/` (official public-feed adapters, cache, freshness and failure retention), `backend/main.py` (FastAPI), and the Next.js `frontend/features/` and `frontend/app/` flows. Audit their contracts and migrations before introducing new tables or abstractions. Preserve 13F reporting-period, filing-date, and check-time distinctions; ARKK is a separate daily fund-holdings source, not a 13F.
+
+## Phase 1 — registry and comparable public positions
+
+1. Replace the small featured-only manager constant as the *sole* index with an extensible tracked-entity registry. Keep current managers and add the requested famous, quant, hedge, activist, ETF, insider, and public-official candidates only after verifying legal identity, CIK, filing availability, source, and data quality from official records. Store `id`, canonical/display names, type, verified CIK/source, notable person, website, tags, active/unsupported status, notes, and optional verified public-source links. Never invent a CIK, position, ownership, or social handle. Unsupported/unmatched managers stay visible with a reason.
+2. Add lazy SEC 13F manager search/CIK resolution, user following of nonfeatured verified filers, and cached filing history. Do not crawl every filer at startup. Existing followed entities and SQLite data must migrate without loss.
+3. Strengthen Python-only comparable-period changes: shares/value/weight before and after, absolute and percent share change, weight change, NEW/INCREASED/REDUCED/EXITED/UNCHANGED. File amendments and different report periods need explicit handling, not silent pooling. The deterministic importance score ranks disclosure events, **not investments**.
+4. Add tracked institutional activity and institutional convergence to company Research/Discover. Aggregate only a clearly stated tracked universe and comparable reporting periods. Label reporting and filing dates; do not call this sentiment, current positions, investor motive, or a buy/sell signal.
+
+## Phase 2 — free, extensible public-update providers
+
+Define a source-independent `SocialProvider` (or more accurately `PublicUpdateProvider`) contract with `fetch_updates(source, cursor, limit)`, `resolve_source(identifier)`, and `health_check()`. Normalize results before storage: provider/source IDs, canonical entity, author/publisher, headline or text, original URL, publication/event/check times, referenced URLs, source type, and provider cursor/metadata. Do not send arbitrary raw provider payloads to the frontend. Each provider owns incremental sync, deduplication, TTL, retry-after, size limits, and last-good-cache retention.
+
+Initial enabled providers, in order of reliability and availability:
+
+- `RSSProvider`: permitted official RSS/Atom feeds from regulators, companies, investor relations and fund newsrooms, including already-working Market Pulse sources where relevant.
+- `OfficialDisclosureProvider`: public SEC 13F, Form 4, Schedule 13D/G and company filings using existing adapters and provenance rather than duplicate SEC clients.
+- `WebsiteFeedProvider`: only curated official investor/fund sites, letters, press-release indexes or official blogs with stable publicly accessible feeds/download links. Respect published terms and rate limits; prefer feeds and canonical documents. A site that requires fragile or prohibited scraping is unsupported, not an excuse to bypass controls.
+
+Free/public availability is checked per source; a public page is not assumed to grant unrestricted automated reuse. Record source-specific attribution, availability, and coverage gaps. No mandatory paid market-data API, paid social feed, paid newswire, or paid fallback. Existing optional quote data must not gate V2 intelligence and must remain explicitly delayed/unavailable when it fails.
+
+**X/Twitter is excluded from the enabled V2 provider set.** No paid X API, no X polling, no `X_BEARER_TOKEN` requirement, no X-only navigation/follow flow, and no scraped-X default. `XProvider` may be an explicitly disabled interface/stub for future work, with no operational dependency or tests requiring live X. Add actual X support only after verifying a legitimate, stable, official free access method, legal terms, and a separate opt-in product decision. Until then, “What did people I follow say?” means supported official/public-source updates, not claimed X coverage. Verified X handles may remain optional inert registry metadata; never guess handles or imply their posts are being monitored. Do not retain the old proposal's X-first phases, pricing-control work, `ENABLE_X_INTELLIGENCE` scheduling, or instructions to enable X.
+
+## Phase 3 — unified event and personalization model
+
+Create a stable, migration-safe normalized event schema spanning institutional filings/position changes, Form 4 insider transactions, 13D/G ownership changes, company filings/announcements, investor letters and public updates, thesis changes, and watchlist matches. Required common fields: deterministic event ID, event/source type, entity and ticker when confidently resolved, original source URL, reporting period where applicable, source publication/filing date, event date when known, detected/check time, payload schema version, provenance, and quality/freshness state. Keep original documents linked. Deduplicate deterministically by source IDs/accession/document URLs and event-specific keys; do not merge unrelated same-ticker events. Never present ingestion time as event time.
+
+Link names to tickers conservatively with a verified mapping method/source and an unresolved state. Separate follows for investors/institutions, companies, and public update sources; migrate the current `follows` and `watchlist` records rather than duplicating them. Relevance ranking combines deterministic event importance, follows/watchlist overlap, novelty, source identity, and dated coverage. Optional local semantic classification may sort or summarize supported material, never invent investor intent, positions, or a stock-price forecast. Distinguish “source said” from “ThesisLens analysis.”
+
+Home becomes a personalized Intelligence Feed with All, Investors, Institutions, Companies, Insiders, Public Updates and My Watchlist filters. Every card shows who, what, why shown, original source, event/reporting time, filing/publication time and stale/coverage state. Discover adds featured and verified managers, reported changes/exits, comparable-period convergence and followed official sources. Research shows tracked institutional activity with an incomplete-universe label. Keep navigation compact and preserve Ask's existing financial research: route structured portfolio/insider/feed questions to deterministic queries and use RAG/LLM only for cited narrative evidence. Replace X-specific “Social” wording with “Public Updates” until a genuinely supported social provider exists.
+
+## Phase 4 — free notifications, Hermes and daily brief
+
+Persist a provider-independent notification outbox with event ID, recipient/channel, deterministic priority, deduplication key, creation/attempt/delivery/read/dismissal times and pending/delivered/failed/dismissed/read status. Rank before delivery: followed new filings, large *reported* changes, and notable watched Form 4 activity may be immediate; routine updates and low-magnitude events go to the digest. Add per-user quiet hours, daily caps, retries/backoff and idempotency. No LLM-only notification gate.
+
+Provide free delivery paths: Telegram Bot, a self-hosted/local `ntfy` instance, and/or a locally running Hermes Agent. Telegram's ordinary Bot API currently has a free rate-limited path; explicitly **do not enable paid broadcasts**, and queue/throttle within the free limits instead ([official Bot FAQ](https://core.telegram.org/bots/faq)). `ntfy` server software can be self-hosted ([official terms](https://docs.ntfy.sh/terms/)). No Twilio, paid push/messaging API, or commercial notification requirement. Channel failure cannot lose the event or break the feed. Provide a no-notification/local-only mode. Verify each channel's current official terms and interface before enabling it.
+
+Expose bounded, source-cited REST contracts for Hermes: latest/watchlist events, investor portfolio/changes, company institutional/public updates, financial evidence search, daily brief, and mark-read. Hermes calls ThesisLens REST; it does not read/write SQLite or calculate 13F differences. Validate the current official Hermes skill/tool mechanism immediately before implementation; write the smallest compatible adapter and `docs/hermes-integration.md` with local trusted-network setup, optional Telegram/ntfy delivery, security boundaries and deployment caveats. Hermes and any model it uses must be optional; the core app and briefs still work without Hermes or a paid hosted model. The daily brief groups institutional activity, watchlist, insiders, supported public updates and worth-investigating items from stored structured events, with citations and explicit quiet/no-data states.
+
+## Phase 5 — safe refresh, tests and rollout
+
+Provide an explicit bounded refresh command/scheduler entrypoint with per-source intervals, single-flight protection, persistent cursor/last-success/last-error/retry-after, conditional requests where supported, and conservative SEC limits. No uncontrolled startup crawl or paid fallback. Continue serving the last successful snapshot with a stale label when a source fails. Use schema-versioned additive SQLite migrations with backups/rollback instructions and tests against existing local data; do not recreate the application or database.
+
+Test manager/CIK verification and unsupported states; compatible 13F comparisons; event generation/deduplication; convergence; conservative entity linking; RSS/official-site/SEC normalization; source failure/stale retention; X-disabled operation with **no** X credential; provider mocks without paid calls; notification priority/deduplication/retries; daily brief and Hermes REST contracts; existing Ask/Research/Market Pulse regressions; frontend empty/loading/mobile states. Run project-local Python tests and Ruff, frontend unit tests/typecheck/build, and practical Playwright checks. No live paid API call belongs in CI. Live public-source checks are explicit and rate-limited, not part of ordinary unit tests.
+
+Completion report: supported vs unsupported institutions and source quality; enabled free providers; source checks, freshness and failures; schema migrations and preserved data; deterministic change/importance semantics; event/feed/Ask and notification behavior; Hermes compatibility; disabled-X status; exact tests/build outcomes; known coverage limits; and a cost audit confirming no mandatory paid data/social/notification credential. Do not commit secrets. Keep backend local-only unless authentication, authorization, rate limiting and transport security are separately designed.
+
+## Changes from the supplied V2 proposal
+
+| Supplied proposal | This plan |
+| --- | --- |
+| X API as initial social provider; bearer-token setup | X disabled/future-only; no token required or X-specific runtime path |
+| Curated X post feed, account follows, X cost controls | Provider-neutral official public updates and source follows; no X claims |
+| Social/X feed filter and Ask wording | Public Updates filter and questions limited to supported sources |
+| X sync in refresh service and mocked X ingestion | RSS/official/disclosure sync and disabled-X tests; no paid endpoint |
+| Hermes notifications as a goal | Optional REST adapter plus outbox; free Telegram Bot, self-hosted ntfy or local Hermes |
+| Unqualified provider convenience | Source legality, reliability, freshness and zero-mandatory-fee gate |
+
+Official Hermes implementation details should be rechecked when Phase 4 begins. Its project documentation currently describes skills/toolsets and Telegram gateway configuration, but this plan deliberately does not invent a ThesisLens-specific Hermes plugin API: [Hermes quickstart](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/getting-started/quickstart.md), [tools reference](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/reference/tools-reference.md).
+
+SEC's public submissions and XBRL data endpoints currently require no API authentication/key; automated use still must follow SEC access policies ([official EDGAR API documentation](https://www.sec.gov/search-filings/edgar-application-programming-interfaces)).

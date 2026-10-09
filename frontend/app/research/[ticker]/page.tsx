@@ -1,5 +1,6 @@
 import { CompanyResearch } from "@/features/research/company";
 import { PulseResearchContext } from "@/features/market-pulse/pulse";
+import { InstitutionalActivity } from "@/features/intelligence/feed";
 export default async function Research({
   params,
   searchParams,
@@ -15,6 +16,7 @@ export default async function Research({
         <PulseResearchContext eventId={event} ticker={ticker.toUpperCase()} />
       )}
       <CompanyResearch ticker={ticker.toUpperCase()} />
+      <InstitutionalActivity ticker={ticker.toUpperCase()} />
     </div>
   );
 }
