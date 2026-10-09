@@ -84,7 +84,7 @@ test("Ask has structured fallback with sources collapsed and no invented motive"
   });
 });
 
-test("general AI is intent-routed and fails explicitly when unconfigured", async ({
+test("general AI is intent-routed and identifies a stopped local service", async ({
   page,
 }) => {
   await page.goto("/ask");
@@ -98,7 +98,9 @@ test("general AI is intent-routed and fails explicitly when unconfigured", async
     page.getByRole("heading", { name: "General AI response", exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("alert").getByText("General AI configuration required"),
+    page
+      .getByRole("alert")
+      .getByText("Ollama service is not running", { exact: true }),
   ).toBeVisible();
   const response = page.getByRole("article");
   await expect(

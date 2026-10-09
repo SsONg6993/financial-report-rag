@@ -84,6 +84,11 @@ export const pulseSchema = z.object({
       stale: z.boolean(),
     }),
   ),
+  status: z
+    .enum(["ready", "stale_cache", "source_unavailable", "empty_cache"])
+    .default("ready"),
+  diagnostic: z.string().default("Cached public-source events are available."),
+  skipped_candidate_count: z.number().default(0),
 });
 export const pulseDetailSchema = eventSchema.extend({
   reaction_note: z.string(),

@@ -11,6 +11,7 @@ class GenerationResult:
     answer: str | None
     available: bool
     error: str | None = None
+    error_code: str | None = None
 
 
 def generate_answer(
@@ -63,6 +64,46 @@ def generate_general_answer(
             False,
             "Remote LLM use is disabled. Set ALLOW_REMOTE_LLM=true only after "
             "reviewing the provider's data-handling policy.",
+            "remote_llm_disabled",
+        )
+    endpoint = base_url.rstrip("/")
+    try:
+        tags = requests.get(f"{endpoint}/api/tags", timeout=(2, 5))
+        tags.raise_for_status()
+        models = tags.json().get("models", [])
+        installed = {
+            name
+            for item in models
+            for name in (item.get("name"), item.get("model"))
+            if isinstance(name, str)
+        }
+    except requests.ConnectionError:
+        return GenerationResult(
+            None,
+            False,
+            f"Ollama service is not running at {base_url}. Start it with `ollama serve`.",
+            "ollama_service_not_running",
+        )
+    except requests.Timeout:
+        return GenerationResult(
+            None,
+            False,
+            f"Ollama service did not respond at {base_url}.",
+            "ollama_timeout",
+        )
+    except (requests.RequestException, KeyError, TypeError, ValueError):
+        return GenerationResult(
+            None,
+            False,
+            f"Ollama service at {base_url} returned an invalid status response.",
+            "ollama_invalid_response",
+        )
+    if model not in installed:
+        return GenerationResult(
+            None,
+            False,
+            f"Ollama model '{model}' is not installed locally. Model download requires explicit approval.",
+            "ollama_model_missing",
         )
     prompt = (
         "You are ThesisLens in General mode. Answer the user's general question "
@@ -73,7 +114,7 @@ def generate_general_answer(
     )
     try:
         response = requests.post(
-            f"{base_url.rstrip('/')}/api/generate",
+            f"{endpoint}/api/generate",
             json={"model": model, "prompt": prompt, "stream": False},
             timeout=(2, 120),
         )
@@ -82,9 +123,24 @@ def generate_general_answer(
         if not answer:
             return GenerationResult(None, False, "The configured LLM returned no text.")
         return GenerationResult(answer, True)
-    except (requests.RequestException, KeyError, ValueError):
+    except requests.ConnectionError:
         return GenerationResult(
             None,
             False,
-            "General AI is not configured or the configured Ollama service is unavailable.",
+            f"Ollama service stopped responding at {base_url}.",
+            "ollama_service_not_running",
+        )
+    except requests.Timeout:
+        return GenerationResult(
+            None,
+            False,
+            f"Ollama model '{model}' timed out before producing a response.",
+            "ollama_timeout",
+        )
+    except (requests.RequestException, KeyError, TypeError, ValueError):
+        return GenerationResult(
+            None,
+            False,
+            f"Ollama model '{model}' returned an invalid response.",
+            "ollama_invalid_response",
         )

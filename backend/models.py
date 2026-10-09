@@ -119,4 +119,5 @@ class Answer(ResponseModel):
     intent: str = "financial_research"
     mode: str = "auto"
     configuration_error: str | None = None
+    configuration_error_code: str | None = None
     privacy: str = "No private workspace data was sent to an external model."
