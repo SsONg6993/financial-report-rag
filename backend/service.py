@@ -23,6 +23,7 @@ from src.config import AppConfig
 from src.decision import JevDecisionProvider
 from src.local_store import LocalStore, utc_now
 from src.market import ResilientMarketProvider
+from src.portfolio_overlap import analyze_overlap
 from src.portfolios import (
     PortfolioSnapshot,
     Sec13FProvider,
@@ -283,6 +284,19 @@ class ResearchService:
 
     def investors(self) -> list[dict]:
         return [self.investor(i.id) for i in self.registry.all()]
+
+    def portfolio_overlap(
+        self, institution_ids: list[str], period: str | None = None
+    ) -> dict:
+        unique_ids = list(dict.fromkeys(institution_ids))
+        if not 2 <= len(unique_ids) <= 5:
+            raise ValueError("Select between 2 and 5 distinct institutions.")
+        missing = [key for key in unique_ids if self.registry.get(key) is None]
+        if missing:
+            raise ValueError("Unknown institution: " + ", ".join(missing))
+        return analyze_overlap(
+            {key: self.portfolios(key) for key in unique_ids}, period=period
+        )
 
     def chunks(self, ticker: str) -> list[dict]:
         company = self.cached_company(ticker) or {}

@@ -1,9 +1,9 @@
 """Run: python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000."""
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 load_dotenv()
@@ -105,6 +105,17 @@ def home(background: BackgroundTasks):
 @app.get("/api/investors", response_model=list[Investor])
 def investors():
     return service.investors()
+
+
+@app.get("/api/portfolio-overlap")
+def portfolio_overlap(
+    investors: Annotated[list[str], Query(min_length=2, max_length=5)],
+    period: str | None = None,
+):
+    try:
+        return service.portfolio_overlap(investors, period)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.get("/api/companies/search")

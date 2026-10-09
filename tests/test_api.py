@@ -125,6 +125,49 @@ def test_missing_sources_are_not_filled(client):
     assert client.get("/api/insiders/AAPL").json()["available"] is False
 
 
+def test_portfolio_overlap_api_uses_stored_class_aware_disclosures(client):
+    snapshot = PortfolioSnapshot(
+        "pershing",
+        "2025-06-30",
+        "2025-08-14",
+        "https://www.sec.gov/pershing-fixture",
+        "pershing-2025-06-30",
+        holdings=[
+            Holding(
+                "APPLE INC",
+                "COM",
+                "037833100",
+                50,
+                500,
+                ticker="AAPL",
+                weight=1,
+            )
+        ],
+    )
+    main.service.store.save_snapshot(
+        "portfolio", "pershing", snapshot.reporting_period, snapshot.to_dict()
+    )
+    response = client.get(
+        "/api/portfolio-overlap",
+        params=[("investors", "berkshire"), ("investors", "pershing")],
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["summary"]["common_count"] == 1
+    assert data["summary"]["jaccard"] == 1
+    assert data["securities"][0]["cusip"] == "037833100"
+    assert data["institutions"][0]["source_url"].startswith("https://www.sec.gov/")
+
+
+def test_portfolio_overlap_api_rejects_invalid_selection(client):
+    assert (
+        client.get(
+            "/api/portfolio-overlap", params={"investors": "berkshire"}
+        ).status_code
+        == 422
+    )
+
+
 def test_track_edit_evaluate_history(client):
     suggestions = client.get("/api/company/AAPL/suggested-theses").json()
     assert len(suggestions) == 4

@@ -1,5 +1,6 @@
 import { InvestorList } from "@/features/discover/investors";
 import { PublicOfficials } from "@/features/discover/public-officials";
+import { PortfolioNetwork } from "@/features/portfolio-network/portfolio-network";
 export default function Discover() {
   return (
     <div className="page">
@@ -11,6 +12,7 @@ export default function Discover() {
           choose which companies deserve your own research.
         </p>
       </div>
+      <PortfolioNetwork />
       <InvestorList />
       <PublicOfficials />
     </div>
