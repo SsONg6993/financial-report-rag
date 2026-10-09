@@ -233,7 +233,7 @@ function AllocationChart({ investor }: { investor: Investor }) {
           <span className="source !mt-0">top five</span>
         </div>
       </div>
-      <div className="space-y-3">
+      <div className="min-w-0 space-y-3">
         {top.map((holding, index) => (
           <div
             className="flex items-center justify-between gap-3 text-sm"
@@ -383,36 +383,47 @@ export function InvestorProfile({ id }: { id: string }) {
       )}
       {i.holdings.length > 0 && (
         <Section title="Top Holdings">
-          <div className="panel space-y-2">
+          <div className="panel holdings-table">
+            <div className="holding-grid holding-header" aria-hidden="true">
+              <span>Security</span>
+              <span>Reported value</span>
+              <span>Portfolio weight</span>
+              <span>Research</span>
+            </div>
             {i.holdings.slice(0, 10).map((holding, index) => (
-              <div
-                className="holding-row"
+              <article
+                className="holding-grid"
                 key={holding.cusip + holding.put_call + index}
               >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted/60 font-mono text-xs muted">
-                  {holding.ticker ? (
-                    <EntityAvatar
-                      kind="company"
-                      id={holding.ticker}
-                      name={holding.ticker}
-                      size="sm"
-                    />
-                  ) : (
-                    index + 1
-                  )}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline justify-between gap-4">
-                    <p className="truncate font-medium">
-                      {holding.ticker || holding.issuer}
+                <div className="holding-main">
+                  <EntityAvatar
+                    kind="company"
+                    id={holding.ticker}
+                    name={holding.ticker || holding.issuer}
+                    size="sm"
+                  />
+                  <div className="min-w-0">
+                    <p className="flex flex-wrap items-center gap-2 font-semibold">
+                      <span>{holding.ticker || "Unmapped security"}</span>
+                      {holding.put_call && (
+                        <span className="pill">{holding.put_call}</span>
+                      )}
                     </p>
-                    <span className="shrink-0 font-mono text-sm">
-                      {percent(holding.weight)}
-                    </span>
+                    <p className="text-xs muted break-words">
+                      {holding.issuer}
+                    </p>
+                    <p className="source !mt-1">
+                      {holding.security_class || "Class unavailable"} ·{" "}
+                      {holding.share_type}
+                    </p>
                   </div>
-                  <p className="truncate text-xs muted">
-                    {holding.issuer} · {money(holding.reported_value)}
-                  </p>
+                </div>
+                <div className="holding-stat" data-label="Reported value">
+                  <strong>{money(holding.reported_value)}</strong>
+                  <span>{holding.shares.toLocaleString()} reported shares</span>
+                </div>
+                <div className="holding-stat" data-label="Portfolio weight">
+                  <strong>{percent(holding.weight)}</strong>
                   <div className="weight-track">
                     <div
                       className="weight-fill"
@@ -422,12 +433,63 @@ export function InvestorProfile({ id }: { id: string }) {
                     />
                   </div>
                 </div>
-                {holding.ticker && !holding.put_call && (
-                  <Button variant="ghost" size="sm" asChild>
-                    <Link href={`/research/${holding.ticker}`}>Research</Link>
-                  </Button>
-                )}
-              </div>
+                <div className="holding-actions">
+                  {holding.ticker_verified && !holding.put_call ? (
+                    <Button variant="outline" size="sm" asChild>
+                      <Link href={`/research/${holding.ticker}`}>Research</Link>
+                    </Button>
+                  ) : (
+                    <span className="source !mt-0">
+                      No verified research mapping
+                    </span>
+                  )}
+                </div>
+                <details className="entry-estimate">
+                  <summary>
+                    Estimated entry price ·{" "}
+                    {holding.entry_price_estimate?.label ||
+                      "Not reliably estimable"}
+                  </summary>
+                  {holding.entry_price_estimate?.status ===
+                  "indicative_range" ? (
+                    <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3">
+                      <p>
+                        <span className="muted">Possible range</span>
+                        <br />
+                        <strong>
+                          {money(holding.entry_price_estimate.price_low)}–
+                          {money(holding.entry_price_estimate.price_high)}
+                        </strong>
+                      </p>
+                      <p>
+                        <span className="muted">Daily-close average</span>
+                        <br />
+                        <strong>
+                          {money(
+                            holding.entry_price_estimate.estimated_average,
+                          )}
+                        </strong>
+                      </p>
+                      <p>
+                        <span className="muted">Confidence</span>
+                        <br />
+                        <strong className="capitalize">
+                          {holding.entry_price_estimate.confidence}
+                        </strong>
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm muted">
+                      {holding.entry_price_estimate?.assumptions[0] ||
+                        "Insufficient comparable disclosure and price evidence."}
+                    </p>
+                  )}
+                  <p className="source">
+                    Actual purchase cost is unknown.{" "}
+                    {holding.entry_price_estimate?.method}
+                  </p>
+                </details>
+              </article>
             ))}
           </div>
         </Section>
@@ -485,7 +547,7 @@ export function InvestorProfile({ id }: { id: string }) {
         </p>
         <div className="grid-cards">
           {i.holdings
-            .filter((h) => h.ticker && !h.put_call)
+            .filter((h) => h.ticker_verified && !h.put_call)
             .slice(0, 3)
             .map((h) => (
               <article className="panel" key={h.ticker}>

@@ -153,20 +153,29 @@ def test_history_uses_only_real_stored_snapshots():
             snapshot("berkshire", "2026-06-30", [holding("A", "AAPL", 0.4)]),
             snapshot("berkshire", "2026-03-31", [holding("B", "KO", 0.2)]),
         ],
-        "pershing": [
-            snapshot("pershing", "2026-06-30", [holding("C", "GOOG", 0.3)])
-        ],
+        "pershing": [snapshot("pershing", "2026-06-30", [holding("C", "GOOG", 0.3)])],
     }
     result = analyze_overlap(data)
     assert [
-        (row["institution_id"], row["reporting_period"])
-        for row in result["history"]
+        (row["institution_id"], row["reporting_period"]) for row in result["history"]
     ] == [
         ("berkshire", "2026-06-30"),
         ("berkshire", "2026-03-31"),
         ("pershing", "2026-06-30"),
     ]
     assert result["history"][0]["top_five_weight"] == 0.4
+    assert result["history"][0]["filing_date"] == "2026-08-14"
+    assert result["history"][0]["source_url"].endswith("/berkshire/2026-06-30")
+    assert result["history"][0]["top_holdings"] == [
+        {
+            "ticker": "AAPL",
+            "issuer": "AAPL INC",
+            "weight": 0.4,
+            "reported_value": 400000.0,
+            "cusip": "A",
+            "security_class": "COM",
+        }
+    ]
 
 
 def test_selection_limits_are_enforced():

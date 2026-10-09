@@ -32,15 +32,27 @@ class YahooFinanceProvider:
             history = []
             if history_frame is not None and not history_frame.empty:
                 history = [
-                    {"date": str(index.date()), "close": float(row["Close"])}
+                    {
+                        "date": str(index.date()),
+                        "close": float(row["Close"]),
+                        "stock_split": float(row.get("Stock Splits") or 0),
+                    }
                     for index, row in history_frame.iterrows()
                     if row.get("Close") is not None
                 ]
             return MarketSnapshot(
                 ticker=ticker,
-                price=info.get("currentPrice") or info.get("regularMarketPrice") or (history[-1]["close"] if history else None),
-                previous_close=info.get("regularMarketPreviousClose") or info.get("previousClose") or (history[-2]["close"] if len(history) > 1 else None),
-                quote_as_of=datetime.fromtimestamp(info["regularMarketTime"], UTC).isoformat() if info.get("regularMarketTime") else (history[-1]["date"] if history else None),
+                price=info.get("currentPrice")
+                or info.get("regularMarketPrice")
+                or (history[-1]["close"] if history else None),
+                previous_close=info.get("regularMarketPreviousClose")
+                or info.get("previousClose")
+                or (history[-2]["close"] if len(history) > 1 else None),
+                quote_as_of=datetime.fromtimestamp(
+                    info["regularMarketTime"], UTC
+                ).isoformat()
+                if info.get("regularMarketTime")
+                else (history[-1]["date"] if history else None),
                 fetched_at=datetime.now(UTC).isoformat(),
                 provider="Yahoo Finance",
                 source_url=f"https://finance.yahoo.com/quote/{ticker}/",
@@ -61,7 +73,9 @@ class YahooFinanceProvider:
                 history=history,
             )
         except Exception as exc:  # noqa: BLE001 - optional provider must fail closed.
-            return MarketSnapshot(ticker=ticker, error=f"Market data unavailable: {type(exc).__name__}")
+            return MarketSnapshot(
+                ticker=ticker, error=f"Market data unavailable: {type(exc).__name__}"
+            )
 
 
 class NasdaqProvider:
@@ -71,12 +85,14 @@ class NasdaqProvider:
         ticker = normalize_ticker(ticker)
         url = f"https://api.nasdaq.com/api/quote/{ticker}/info?assetclass=stocks"
         headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+
         def numeric(value):
             try:
                 result = float(str(value).replace("$", "").replace(",", ""))
                 return result if math.isfinite(result) else None
             except (TypeError, ValueError):
                 return None
+
         try:
             response = requests.get(url, headers=headers, timeout=12)
             response.raise_for_status()
@@ -84,18 +100,25 @@ class NasdaqProvider:
             quote = data["primaryData"]
             summary = {}
             try:
-                response = requests.get(f"https://api.nasdaq.com/api/quote/{ticker}/summary?assetclass=stocks", headers=headers, timeout=12)
+                response = requests.get(
+                    f"https://api.nasdaq.com/api/quote/{ticker}/summary?assetclass=stocks",
+                    headers=headers,
+                    timeout=12,
+                )
                 response.raise_for_status()
                 summary = response.json()["data"].get("summaryData", {})
             except (requests.RequestException, ValueError, KeyError, TypeError):
                 pass  # Quote remains usable if optional company metadata fails.
             return MarketSnapshot(
-                ticker=ticker, price=numeric(quote.get("lastSalePrice")),
+                ticker=ticker,
+                price=numeric(quote.get("lastSalePrice")),
                 previous_close=numeric(summary.get("PreviousClose", {}).get("value")),
                 market_cap=numeric(summary.get("MarketCap", {}).get("value")),
                 trailing_pe=numeric(summary.get("PERatio", {}).get("value")),
-                quote_as_of=quote.get("lastTradeTimestamp"), fetched_at=datetime.now(UTC).isoformat(),
-                provider="Nasdaq", source_url=f"https://www.nasdaq.com/market-activity/stocks/{ticker.lower()}",
+                quote_as_of=quote.get("lastTradeTimestamp"),
+                fetched_at=datetime.now(UTC).isoformat(),
+                provider="Nasdaq",
+                source_url=f"https://www.nasdaq.com/market-activity/stocks/{ticker.lower()}",
                 company_name=data.get("companyName", ticker),
                 status="live" if quote.get("isRealTime") is True else "delayed",
             )
@@ -105,14 +128,24 @@ class NasdaqProvider:
 
 class ResilientMarketProvider:
     def __init__(self, providers=None):
-        self.providers = providers if providers is not None else [YahooFinanceProvider(), NasdaqProvider()]
+        self.providers = (
+            providers
+            if providers is not None
+            else [YahooFinanceProvider(), NasdaqProvider()]
+        )
 
     def snapshot(self, ticker: str) -> MarketSnapshot:
         for provider in self.providers:
             try:
                 result = provider.snapshot(ticker)
-                if result.price is not None and math.isfinite(result.price) and result.price > 0:
+                if (
+                    result.price is not None
+                    and math.isfinite(result.price)
+                    and result.price > 0
+                ):
                     return result
             except Exception:  # noqa: BLE001, S112 - independent providers must not gate each other.
                 continue
-        return MarketSnapshot(ticker=ticker, error="All market quote providers unavailable")
+        return MarketSnapshot(
+            ticker=ticker, error="All market quote providers unavailable"
+        )

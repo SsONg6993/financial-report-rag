@@ -33,14 +33,23 @@ class Institution:
     def __post_init__(self):
         if self.cik:
             if not self.cik_source_url:
-                object.__setattr__(self, "cik_source_url",
-                    f"https://www.sec.gov/edgar/browse/?CIK={self.cik}&owner=exclude")
+                object.__setattr__(
+                    self,
+                    "cik_source_url",
+                    f"https://www.sec.gov/edgar/browse/?CIK={self.cik}&owner=exclude",
+                )
             if not self.source_notes:
-                object.__setattr__(self, "source_notes",
-                    "CIK and original 13F-HR filing observed in official SEC submissions on 2026-10-05.")
+                object.__setattr__(
+                    self,
+                    "source_notes",
+                    "CIK and original 13F-HR filing observed in official SEC submissions on 2026-10-05.",
+                )
             if not self.data_quality_notes:
-                object.__setattr__(self, "data_quality_notes",
-                    "13F is delayed and partial; amendments are not consolidated and positions are not current trades.")
+                object.__setattr__(
+                    self,
+                    "data_quality_notes",
+                    "13F is delayed and partial; amendments are not consolidated and positions are not current trades.",
+                )
 
 
 INSTITUTIONS = (
@@ -52,7 +61,11 @@ INSTITUTIONS = (
         1067983,
     ),
     Institution(
-        "pershing", "Pershing Square", "Bill Ackman", "Concentrated / Activist", 1336528,
+        "pershing",
+        "Pershing Square",
+        "Bill Ackman",
+        "Concentrated / Activist",
+        1336528,
         manager_type="activist",
         data_quality_notes="Latest original 13F-HR in the recent SEC index reports Q1 2026; Q2 coverage unavailable. 13F is delayed and partial; amendments are not consolidated.",
     ),
@@ -65,7 +78,11 @@ INSTITUTIONS = (
         manager_type="hedge_fund",
     ),
     Institution(
-        "bridgewater", "Bridgewater Associates", "", "Macro / Diversified", 1350694,
+        "bridgewater",
+        "Bridgewater Associates",
+        "",
+        "Macro / Diversified",
+        1350694,
         manager_type="hedge_fund",
     ),
     Institution(
@@ -96,12 +113,30 @@ INSTITUTIONS = (
         1536411,
         manager_type="family_office",
     ),
-    Institution("soros", "Soros Fund Management", "", "Macro / Diversified", 1029160,
-                manager_type="family_office"),
-    Institution("tiger", "Tiger Global", "", "Growth / Technology", 1167483,
-                manager_type="hedge_fund"),
-    Institution("coatue", "Coatue Management", "", "Growth / Technology", 1135730,
-                manager_type="hedge_fund"),
+    Institution(
+        "soros",
+        "Soros Fund Management",
+        "",
+        "Macro / Diversified",
+        1029160,
+        manager_type="family_office",
+    ),
+    Institution(
+        "tiger",
+        "Tiger Global",
+        "",
+        "Growth / Technology",
+        1167483,
+        manager_type="hedge_fund",
+    ),
+    Institution(
+        "coatue",
+        "Coatue Management",
+        "",
+        "Growth / Technology",
+        1135730,
+        manager_type="hedge_fund",
+    ),
     Institution(
         "baupost",
         "Baupost Group LLC/MA",
@@ -465,6 +500,7 @@ class Sec13FProvider:
                 matches = names.get(key, [])
                 if len(matches) == 1:
                     holding.ticker = matches[0]
+                    holding.ticker_source = f"{SEC_WWW}/files/company_tickers.json"
             snapshot.notes += " Tickers, where present, use unambiguous exact issuer-name matches in the SEC ticker directory; confirm security class before research."
 
 
@@ -579,6 +615,7 @@ def parse_ark_csv(text: str, source_url: str) -> PortfolioSnapshot:
             shares,
             market_value,
             ticker=ticker,
+            ticker_source=source_url,
         )
         if raw_weight:
             reported_weight = _ark_number(raw_weight, "portfolio weight")

@@ -70,7 +70,8 @@ class Toggle(BaseModel):
 
 class AskInput(BaseModel):
     question: str = Field(min_length=3, max_length=2000)
-    ticker: str = "AAPL"
+    ticker: str | None = None
+    mode: Literal["auto", "general", "research"] = "auto"
 
 
 def valid_ticker(ticker):
@@ -163,7 +164,9 @@ def resolve_investor(data: ResolveManager):
         item = service.registry.resolve_cik(data.cik)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    except Exception as exc:  # SEC source boundary; surface a typed unavailable response.
+    except (
+        Exception
+    ) as exc:  # SEC source boundary; surface a typed unavailable response.
         raise HTTPException(
             503, f"SEC resolution unavailable: {type(exc).__name__}"
         ) from exc
@@ -310,7 +313,8 @@ def ask(data: AskInput, background: BackgroundTasks):
         for word in ("news", "macro", "market pulse", "oil prices")
     ):
         service.market_pulse.schedule(background)
-    return service.ask(data.question.strip(), valid_ticker(data.ticker))
+    ticker = valid_ticker(data.ticker) if data.ticker else None
+    return service.ask(data.question.strip(), ticker, data.mode)
 
 
 @app.get("/api/market-pulse")
@@ -370,29 +374,48 @@ def intelligence_daily_brief():
 
 @app.get("/api/intelligence/outbox")
 def intelligence_outbox():
-    return {"notifications": service.store.notifications(),
-            "note": "Local queue; external delivery is optional and disabled by default."}
+    return {
+        "notifications": service.store.notifications(),
+        "note": "Local queue; external delivery is optional and disabled by default.",
+    }
 
 
 @app.get("/api/intelligence/sources")
 def public_sources():
     followed = set(service.store.source_follows())
-    sources = [{"id": item.id, "name": item.name, "source_url": item.url,
-                "followed": item.id in followed,
-                "checked_at": service.market_pulse.state(item).get("checked_at"),
-                "error": service.market_pulse.state(item).get("error")}
-               for item in service.market_pulse.providers]
-    sources.append({"id": "berkshire-letters", "name": "Berkshire shareholder letters",
-                    "source_url": service.public_providers["website"].URL,
-                    "followed": "berkshire-letters" in followed,
-                    "checked_at": None, "error": "Year-only index; no dated feed events"})
-    return {"sources": sources,
-            "note": "Official public sources only. X/Twitter is disabled."}
+    sources = [
+        {
+            "id": item.id,
+            "name": item.name,
+            "source_url": item.url,
+            "followed": item.id in followed,
+            "checked_at": service.market_pulse.state(item).get("checked_at"),
+            "error": service.market_pulse.state(item).get("error"),
+        }
+        for item in service.market_pulse.providers
+    ]
+    sources.append(
+        {
+            "id": "berkshire-letters",
+            "name": "Berkshire shareholder letters",
+            "source_url": service.public_providers["website"].URL,
+            "followed": "berkshire-letters" in followed,
+            "checked_at": None,
+            "error": "Year-only index; no dated feed events",
+        }
+    )
+    return {
+        "sources": sources,
+        "note": "Official public sources only. X/Twitter is disabled.",
+    }
 
 
 @app.put("/api/intelligence/sources/{source_id}/follow")
 def follow_public_source(source_id: str, data: Toggle):
-    if not any(provider.resolve_source(source_id) for provider in service.public_providers.values()):
+    if not any(
+        provider.resolve_source(source_id)
+        for provider in service.public_providers.values()
+    ):
         raise HTTPException(404, "Unsupported public source")
     service.store.follow_source(source_id, data.enabled)
     return {"source_id": source_id, "followed": data.enabled}

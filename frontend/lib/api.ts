@@ -58,6 +58,31 @@ const holdingSchema = z.object({
   put_call: z.string(),
   sector: z.string(),
   cusip: z.string(),
+  security_class: z.string().default(""),
+  share_type: z.string().default("SH"),
+  ticker_source: z.string().default(""),
+  ticker_verified: z.boolean().default(false),
+  entry_price_estimate: z
+    .object({
+      status: z.enum(["not_reliably_estimable", "indicative_range"]),
+      label: z.string(),
+      actual_purchase_price: z.number().nullable(),
+      estimated_average: z.number().nullable(),
+      price_low: z.number().nullable(),
+      price_high: z.number().nullable(),
+      confidence: z.string(),
+      window: z
+        .object({
+          start: z.string(),
+          end: z.string(),
+          shares_added: z.number(),
+        })
+        .nullable(),
+      method: z.string(),
+      assumptions: z.array(z.string()),
+      source_url: z.string(),
+    })
+    .optional(),
 });
 export const changeSchema = z
   .object({
@@ -167,6 +192,18 @@ export const portfolioOverlapSchema = z.object({
       mapped_count: z.number(),
       disclosed_value_total: z.number(),
       top_five_weight: z.number(),
+      filing_date: z.string(),
+      source_url: z.string(),
+      top_holdings: z.array(
+        z.object({
+          ticker: z.string(),
+          issuer: z.string(),
+          weight: z.number(),
+          reported_value: z.number(),
+          cusip: z.string(),
+          security_class: z.string(),
+        }),
+      ),
     }),
   ),
   changes: z.array(changeSchema.extend({ institution_id: z.string() })),
@@ -397,6 +434,20 @@ export const answerSchema = z.object({
     .optional(),
   synthesis_available: z.boolean().optional(),
   model: z.string().optional(),
+  intent: z
+    .enum([
+      "general",
+      "financial_research",
+      "portfolio_analysis",
+      "current_public_information",
+      "unsupported",
+    ])
+    .default("financial_research"),
+  mode: z.enum(["auto", "general", "research"]).default("auto"),
+  configuration_error: z.string().nullable().optional(),
+  privacy: z
+    .string()
+    .default("No private workspace data was sent to an external model."),
 });
 export const disclosureSchema = z.object({
   available: z.boolean(),

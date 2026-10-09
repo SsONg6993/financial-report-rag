@@ -37,7 +37,9 @@ def _snapshot_for_period(
     )
     if not period:
         return ordered[0]
-    return next((snapshot for snapshot in ordered if snapshot.reporting_period <= period), None)
+    return next(
+        (snapshot for snapshot in ordered if snapshot.reporting_period <= period), None
+    )
 
 
 def _holding_map(snapshot: PortfolioSnapshot) -> dict[str, Holding]:
@@ -158,6 +160,21 @@ def analyze_overlap(
                         holding.reported_value for holding in snapshot.holdings
                     ),
                     "top_five_weight": sum(weights[:5]),
+                    "filing_date": snapshot.filing_date,
+                    "source_url": snapshot.source_url,
+                    "top_holdings": [
+                        {
+                            "ticker": holding.ticker,
+                            "issuer": holding.issuer,
+                            "weight": holding.weight,
+                            "reported_value": holding.reported_value,
+                            "cusip": holding.cusip,
+                            "security_class": holding.security_class,
+                        }
+                        for holding in sorted(
+                            mapped.values(), key=lambda item: item.weight, reverse=True
+                        )[:5]
+                    ],
                 }
             )
 
