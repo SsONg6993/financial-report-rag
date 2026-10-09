@@ -30,7 +30,11 @@ def _snapshot_for_period(
 ) -> PortfolioSnapshot | None:
     if not snapshots:
         return None
-    ordered = sorted(snapshots, key=lambda item: (item.reporting_period, item.filing_date), reverse=True)
+    ordered = sorted(
+        snapshots,
+        key=lambda item: (item.reporting_period, item.filing_date),
+        reverse=True,
+    )
     if not period:
         return ordered[0]
     return next((snapshot for snapshot in ordered if snapshot.reporting_period <= period), None)
@@ -99,19 +103,61 @@ def analyze_overlap(
         for right in ordered_ids[index + 1 :]:
             left_set, right_set = set(maps.get(left, {})), set(maps.get(right, {}))
             pair_union = left_set | right_set
+            comparable = left in maps and right in maps and bool(pair_union)
+            if not comparable:
+                pairwise.append(
+                    {
+                        "left": left,
+                        "right": right,
+                        "comparable": False,
+                        "shared_count": None,
+                        "jaccard": None,
+                        "weight_overlap": None,
+                    }
+                )
+                continue
             pair_shared = left_set & right_set
             pairwise.append(
                 {
                     "left": left,
                     "right": right,
+                    "comparable": True,
                     "shared_count": len(pair_shared),
-                    "jaccard": len(pair_shared) / len(pair_union)
-                    if left in maps and right in maps and pair_union
-                    else None,
+                    "jaccard": len(pair_shared) / len(pair_union),
                     "weight_overlap": sum(
                         min(maps[left][identity].weight, maps[right][identity].weight)
                         for identity in pair_shared
-                    ) if left in maps and right in maps else None,
+                    ),
+                }
+            )
+
+    history_rows = []
+    for institution_id in ordered_ids:
+        institution = BY_ID.get(institution_id)
+        ordered_history = sorted(
+            snapshots_by_institution[institution_id],
+            key=lambda item: (item.reporting_period, item.filing_date),
+            reverse=True,
+        )
+        for snapshot in ordered_history[:8]:
+            mapped = _holding_map(snapshot)
+            weights = sorted(
+                (holding.weight for holding in mapped.values()), reverse=True
+            )
+            history_rows.append(
+                {
+                    "institution_id": institution_id,
+                    "institution_name": institution.name
+                    if institution
+                    else institution_id,
+                    "reporting_period": snapshot.reporting_period,
+                    "source_type": snapshot.source_type,
+                    "holding_count": len(snapshot.holdings),
+                    "mapped_count": len(mapped),
+                    "disclosed_value_total": sum(
+                        holding.reported_value for holding in snapshot.holdings
+                    ),
+                    "top_five_weight": sum(weights[:5]),
                 }
             )
 
@@ -194,7 +240,11 @@ def analyze_overlap(
                 ),
             }
         )
-        history = sorted(snapshots_by_institution[institution_id], key=lambda item: (item.reporting_period, item.filing_date), reverse=True)
+        history = sorted(
+            snapshots_by_institution[institution_id],
+            key=lambda item: (item.reporting_period, item.filing_date),
+            reverse=True,
+        )
         current_index = history.index(snapshot)
         if current_index + 1 < len(history):
             previous = history[current_index + 1]
@@ -213,7 +263,9 @@ def analyze_overlap(
         {
             snapshot.reporting_period
             for snapshots in snapshots_by_institution.values()
-            for snapshot in sorted(snapshots, key=lambda item: item.reporting_period, reverse=True)[:8]
+            for snapshot in sorted(
+                snapshots, key=lambda item: item.reporting_period, reverse=True
+            )[:8]
         },
         reverse=True,
     )[:24]
@@ -232,7 +284,10 @@ def analyze_overlap(
             "Coverage mixes disclosure types (for example, daily fund holdings and quarterly 13F); compare dates and scope before interpreting overlap."
         )
     if not complete or not union:
-        coverage_notes.append("Overlap similarity is unavailable (N/A) when a selected snapshot is missing or no mapped securities exist; N/A does not mean zero overlap.")
+        coverage_notes.append(
+            "Overlap similarity is unavailable (N/A) when a selected snapshot "
+            "is missing or no mapped securities exist; N/A does not mean zero overlap."
+        )
     if unavailable:
         coverage_notes.append(
             "No eligible stored snapshot was available for: "
@@ -273,6 +328,7 @@ def analyze_overlap(
             "weight_overlap": weight_overlap,
         },
         "pairwise": pairwise,
+        "history": history_rows,
         "changes": changes,
         "coverage_notes": coverage_notes,
     }

@@ -151,9 +151,22 @@ export const portfolioOverlapSchema = z.object({
     z.object({
       left: z.string(),
       right: z.string(),
-      shared_count: z.number(),
+      comparable: z.boolean(),
+      shared_count: z.number().nullable(),
       jaccard: z.number().nullable(),
       weight_overlap: z.number().nullable(),
+    }),
+  ),
+  history: z.array(
+    z.object({
+      institution_id: z.string(),
+      institution_name: z.string(),
+      reporting_period: z.string(),
+      source_type: z.string(),
+      holding_count: z.number(),
+      mapped_count: z.number(),
+      disclosed_value_total: z.number(),
+      top_five_weight: z.number(),
     }),
   ),
   changes: z.array(changeSchema.extend({ institution_id: z.string() })),

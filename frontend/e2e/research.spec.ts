@@ -123,6 +123,22 @@ test("portfolio network compares stored disclosures and supports interaction", a
   ).toBeVisible();
   await page.getByRole("button", { name: "Zoom in" }).click();
   await page.getByRole("button", { name: "Reset view" }).click();
+  await expect(
+    page.getByRole("table", { name: "Pairwise Jaccard similarity heatmap" }),
+  ).toBeVisible();
+  const node = canvas
+    .getByRole("button", { name: /Select .* portfolio node/ })
+    .first();
+  await node.focus();
+  await page.keyboard.press("Enter");
+  await expect(
+    page.getByRole("complementary", { name: "Selected network node details" }),
+  ).toBeVisible();
+  await page.getByPlaceholder("Filter company or ticker").fill("AAPL");
+  await expect(
+    page.getByRole("button", { name: "Clear company filter" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Clear company filter" }).click();
   const period = page.getByRole("combobox", { name: "Reporting date" });
   await period.selectOption("2026-03-31");
   await expect(period).toHaveValue("2026-03-31");

@@ -10,7 +10,16 @@ import {
   type KeyboardEvent,
 } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Maximize2, Minus, Pause, Play, Plus } from "lucide-react";
+import {
+  ExternalLink,
+  Maximize2,
+  Minus,
+  Pause,
+  Play,
+  Plus,
+  Search,
+  X,
+} from "lucide-react";
 import { z } from "zod";
 import {
   ErrorState,
@@ -27,6 +36,12 @@ import {
   type PortfolioOverlap,
 } from "@/lib/api";
 import { networkLayout, nextPlaybackPeriod, type Point } from "./layout";
+import {
+  AllocationDonuts,
+  HistoricalEvolution,
+  SimilarityHeatmap,
+} from "./analytics";
+import { visualForEntity } from "@/lib/visual-assets";
 import styles from "./portfolio-network.module.css";
 
 type Hover =
@@ -49,6 +64,10 @@ function initials(name: string): string {
     .toUpperCase();
 }
 
+function institutionName(data: PortfolioOverlap, id: string): string {
+  return data.institutions.find((row) => row.id === id)?.name ?? id;
+}
+
 function NetworkCanvas({
   data,
   reducedMotion,
@@ -59,6 +78,8 @@ function NetworkCanvas({
   const router = useRouter();
   const [view, setView] = useState<View>(BASE_VIEW);
   const [hover, setHover] = useState<Hover>(null);
+  const [selectedNode, setSelectedNode] = useState<Hover>(null);
+  const [filter, setFilter] = useState("");
   const [drag, setDrag] = useState<{ x: number; y: number; view: View } | null>(
     null,
   );
@@ -72,6 +93,39 @@ function NetworkCanvas({
     () => new Set(data.network.securities.map((row) => row.id)),
     [data],
   );
+  const normalizedFilter = filter.trim().toLowerCase();
+  const visibleSecurityIds = useMemo(
+    () =>
+      new Set(
+        data.network.securities
+          .filter(
+            (row) =>
+              !normalizedFilter ||
+              row.ticker.toLowerCase().includes(normalizedFilter) ||
+              row.issuer.toLowerCase().includes(normalizedFilter),
+          )
+          .map((row) => row.id),
+      ),
+    [data, normalizedFilter],
+  );
+  const relatedInstitutions = useMemo(() => {
+    if (!selectedNode) return new Set<string>();
+    if (selectedNode.kind === "institution") return new Set([selectedNode.id]);
+    return new Set(
+      data.network.edges
+        .filter((edge) => edge.security_id === selectedNode.id)
+        .map((edge) => edge.institution_id),
+    );
+  }, [data, selectedNode]);
+  const relatedSecurities = useMemo(() => {
+    if (!selectedNode) return new Set<string>();
+    if (selectedNode.kind === "security") return new Set([selectedNode.id]);
+    return new Set(
+      data.network.edges
+        .filter((edge) => edge.institution_id === selectedNode.id)
+        .map((edge) => edge.security_id),
+    );
+  }, [data, selectedNode]);
 
   useEffect(() => {
     const old = previous.current;
@@ -111,10 +165,13 @@ function NetworkCanvas({
   function activate(path: string): void {
     router.push(path);
   }
-  function keyActivate(event: KeyboardEvent<SVGGElement>, path: string): void {
+  function keySelect(
+    event: KeyboardEvent<SVGGElement>,
+    node: Exclude<Hover, null>,
+  ): void {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      activate(path);
+      setSelectedNode(node);
     }
   }
   const hoveredInstitution =
@@ -125,9 +182,35 @@ function NetworkCanvas({
     hover?.kind === "security"
       ? data.network.securities.find((row) => row.id === hover.id)
       : null;
+  const selectedInstitution =
+    selectedNode?.kind === "institution"
+      ? data.institutions.find((row) => row.id === selectedNode.id)
+      : null;
+  const selectedSecurity =
+    selectedNode?.kind === "security"
+      ? data.network.securities.find((row) => row.id === selectedNode.id)
+      : null;
 
   return (
     <div className={styles.shell} data-testid="portfolio-network-canvas">
+      <label className={styles.search}>
+        <Search size={15} aria-hidden />
+        <span className="sr-only">Filter companies</span>
+        <input
+          value={filter}
+          onChange={(event) => setFilter(event.target.value)}
+          placeholder="Filter company or ticker"
+        />
+        {filter && (
+          <button
+            type="button"
+            aria-label="Clear company filter"
+            onClick={() => setFilter("")}
+          >
+            <X size={14} aria-hidden />
+          </button>
+        )}
+      </label>
       <div className={styles.controls} aria-label="Network zoom controls">
         <button
           className={styles.control}
@@ -182,6 +265,10 @@ function NetworkCanvas({
             (row) => row.id === edge.security_id,
           );
           if (!from || !to) return null;
+          const related =
+            !selectedNode ||
+            (relatedInstitutions.has(edge.institution_id) &&
+              relatedSecurities.has(edge.security_id));
           return (
             <line
               key={`${edge.institution_id}:${edge.security_id}`}
@@ -190,7 +277,7 @@ function NetworkCanvas({
               x2={to.x}
               y2={to.y}
               strokeWidth={1 + Math.min(5, edge.weight * 18)}
-              className={`${styles.edge} ${security && security.owner_count > 1 ? styles.edgeShared : ""}`}
+              className={`${styles.edge} ${security && security.owner_count > 1 ? styles.edgeShared : ""} ${related ? styles.related : styles.dimmed} ${visibleSecurityIds.has(edge.security_id) ? "" : styles.filtered}`}
             />
           );
         })}
@@ -212,10 +299,10 @@ function NetworkCanvas({
           return (
             <g
               key={institution.id}
-              className={styles.node}
-              role="link"
+              className={`${styles.node} ${selectedNode && !relatedInstitutions.has(institution.id) ? styles.dimmed : ""}`}
+              role="button"
               tabIndex={0}
-              aria-label={`Open ${institution.name} portfolio`}
+              aria-label={`Select ${institution.name} portfolio node`}
               transform={`translate(${point.x} ${point.y})`}
               onMouseEnter={() =>
                 setHover({ kind: "institution", id: institution.id })
@@ -225,9 +312,11 @@ function NetworkCanvas({
                 setHover({ kind: "institution", id: institution.id })
               }
               onBlur={() => setHover(null)}
-              onClick={() => activate(`/discover/${institution.id}`)}
+              onClick={() =>
+                setSelectedNode({ kind: "institution", id: institution.id })
+              }
               onKeyDown={(event) =>
-                keyActivate(event, `/discover/${institution.id}`)
+                keySelect(event, { kind: "institution", id: institution.id })
               }
             >
               <rect
@@ -238,8 +327,21 @@ function NetworkCanvas({
                 rx="14"
                 className={styles.institution}
               />
+              {visualForEntity("investor", institution.id) && (
+                <image
+                  href={visualForEntity("investor", institution.id)?.src}
+                  x="-20"
+                  y="-21"
+                  width="40"
+                  height="40"
+                  preserveAspectRatio="xMidYMid slice"
+                  className={styles.nodeImage}
+                />
+              )}
               <text textAnchor="middle" y="-2" className={styles.label}>
-                {initials(institution.name)}
+                {visualForEntity("investor", institution.id)
+                  ? ""
+                  : initials(institution.name)}
               </text>
               <text textAnchor="middle" y="13" className={styles.subLabel}>
                 {institution.holding_count} holdings
@@ -253,10 +355,10 @@ function NetworkCanvas({
           return (
             <g
               key={security.id}
-              className={`${styles.node} ${styles.entering}`}
-              role={security.ticker ? "link" : undefined}
-              tabIndex={security.ticker ? 0 : undefined}
-              aria-label={security.ticker ? `Open research for ${security.ticker}` : undefined}
+              className={`${styles.node} ${styles.entering} ${selectedNode && !relatedSecurities.has(security.id) ? styles.dimmed : ""} ${visibleSecurityIds.has(security.id) ? "" : styles.filtered}`}
+              role="button"
+              tabIndex={0}
+              aria-label={`Select ${security.ticker || security.issuer} holding node`}
               transform={`translate(${point.x} ${point.y})`}
               onMouseEnter={() =>
                 setHover({ kind: "security", id: security.id })
@@ -265,19 +367,32 @@ function NetworkCanvas({
               onFocus={() => setHover({ kind: "security", id: security.id })}
               onBlur={() => setHover(null)}
               onClick={() =>
-                security.ticker && activate(`/research/${security.ticker}`)
+                setSelectedNode({ kind: "security", id: security.id })
               }
               onKeyDown={(event) =>
-                security.ticker &&
-                keyActivate(event, `/research/${security.ticker}`)
+                keySelect(event, { kind: "security", id: security.id })
               }
             >
               <circle
                 r={radius}
                 className={`${styles.security} ${security.owner_count > 1 ? styles.securityShared : ""}`}
               />
+              {security.ticker &&
+                visualForEntity("company", security.ticker) && (
+                  <image
+                    href={visualForEntity("company", security.ticker)?.src}
+                    x={-radius * 0.55}
+                    y={-radius * 0.55}
+                    width={radius * 1.1}
+                    height={radius * 1.1}
+                    preserveAspectRatio="xMidYMid meet"
+                    className={styles.logoImage}
+                  />
+                )}
               <text textAnchor="middle" y="4" className={styles.label}>
-                {security.ticker || "—"}
+                {security.ticker && visualForEntity("company", security.ticker)
+                  ? ""
+                  : security.ticker || "—"}
               </text>
               {security.owner_count > 1 && (
                 <text
@@ -292,6 +407,78 @@ function NetworkCanvas({
           );
         })}
       </svg>
+      <div className={styles.legend} aria-label="Network legend">
+        <span>
+          <i className={styles.legendInstitution} /> Institution
+        </span>
+        <span>
+          <i className={styles.legendHolding} /> Holding
+        </span>
+        <span>
+          <i className={styles.legendShared} /> Shared by 2+
+        </span>
+      </div>
+      {(selectedInstitution || selectedSecurity) && (
+        <aside
+          className={styles.details}
+          aria-label="Selected network node details"
+        >
+          <button
+            className={styles.closeDetails}
+            type="button"
+            aria-label="Clear network selection"
+            onClick={() => setSelectedNode(null)}
+          >
+            <X size={16} />
+          </button>
+          {selectedInstitution && (
+            <>
+              <p className="eyebrow">Institution</p>
+              <strong>{selectedInstitution.name}</strong>
+              <p className="source !mt-1">
+                {selectedInstitution.holding_count} disclosed holdings ·{" "}
+                {selectedInstitution.reporting_period || "period unavailable"}
+              </p>
+              <button
+                type="button"
+                className={styles.openButton}
+                onClick={() => activate(`/discover/${selectedInstitution.id}`)}
+              >
+                Open portfolio <ExternalLink size={13} />
+              </button>
+            </>
+          )}
+          {selectedSecurity && (
+            <>
+              <p className="eyebrow">Verified security</p>
+              <strong>
+                {selectedSecurity.ticker || selectedSecurity.issuer}
+              </strong>
+              <p className="source !mt-1">
+                {selectedSecurity.issuer} · {selectedSecurity.security_class}
+              </p>
+              {selectedSecurity.owners.map((owner) => (
+                <p key={owner.institution_id} className="mt-2 text-xs">
+                  <b>{institutionName(data, owner.institution_id)}</b> ·{" "}
+                  {percent(owner.weight)} · {owner.shares.toLocaleString()}{" "}
+                  shares · {money(owner.reported_value)}
+                </p>
+              ))}
+              {selectedSecurity.ticker && (
+                <button
+                  type="button"
+                  className={styles.openButton}
+                  onClick={() =>
+                    activate(`/research/${selectedSecurity.ticker}`)
+                  }
+                >
+                  Open research <ExternalLink size={13} />
+                </button>
+              )}
+            </>
+          )}
+        </aside>
+      )}
       {(hoveredInstitution || hoveredSecurity) && (
         <div className={styles.tooltip} role="status">
           {hoveredInstitution && (
@@ -502,10 +689,17 @@ export function PortfolioNetwork() {
                   "Combined universe",
                   overlap.data.summary.union_count.toString(),
                 ],
-                ["Jaccard", percent(overlap.data.summary.jaccard)],
+                [
+                  "Jaccard",
+                  overlap.data.summary.jaccard == null
+                    ? "N/A"
+                    : percent(overlap.data.summary.jaccard),
+                ],
                 [
                   "Weight overlap",
-                  percent(overlap.data.summary.weight_overlap),
+                  overlap.data.summary.weight_overlap == null
+                    ? "N/A"
+                    : percent(overlap.data.summary.weight_overlap),
                 ],
               ].map(([label, value]) => (
                 <div className="panel !p-4" key={label}>
@@ -522,6 +716,11 @@ export function PortfolioNetwork() {
                 Metrics use all verified mapped holdings.
               </p>
             )}
+            <div className="mt-5 grid gap-4 lg:grid-cols-2">
+              <SimilarityHeatmap data={overlap.data} />
+              <AllocationDonuts data={overlap.data} />
+              <HistoricalEvolution data={overlap.data} />
+            </div>
             <div className="mt-5 grid gap-4 lg:grid-cols-2">
               <article className="panel">
                 <h3>Comparison coverage</h3>
@@ -575,9 +774,15 @@ export function PortfolioNetwork() {
                           <td>
                             {row.left} / {row.right}
                           </td>
-                          <td>{row.shared_count}</td>
-                          <td>{percent(row.jaccard)}</td>
-                          <td>{percent(row.weight_overlap)}</td>
+                          <td>{row.comparable ? row.shared_count : "N/A"}</td>
+                          <td>
+                            {row.comparable ? percent(row.jaccard ?? 0) : "N/A"}
+                          </td>
+                          <td>
+                            {row.comparable
+                              ? percent(row.weight_overlap ?? 0)
+                              : "N/A"}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
