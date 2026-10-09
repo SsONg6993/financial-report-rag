@@ -96,22 +96,111 @@ export const investorSchema = z.object({
   notes: z.array(z.string()),
   rationale: z.string(),
 });
+const overlapOwnerSchema = z.object({
+  institution_id: z.string(),
+  shares: z.number(),
+  reported_value: z.number(),
+  weight: z.number(),
+});
+const overlapSecuritySchema = z.object({
+  id: z.string(),
+  ticker: z.string(),
+  issuer: z.string(),
+  cusip: z.string(),
+  security_class: z.string(),
+  put_call: z.string(),
+  owner_count: z.number(),
+  owners: z.array(overlapOwnerSchema),
+  combined_weight: z.number(),
+});
+export const portfolioOverlapSchema = z.object({
+  requested_period: z.string().nullable(),
+  periods: z.array(z.string()),
+  institutions: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      investor: z.string().optional(),
+      available: z.boolean(),
+      holding_count: z.number(),
+      mapped_count: z.number(),
+      unmapped_count: z.number(),
+      unique_count: z.number(),
+      reporting_period: z.string().optional(),
+      filing_date: z.string().optional(),
+      source_url: z.string().optional(),
+      source_type: z.string().optional(),
+      freshness: z.string().optional(),
+    }),
+  ),
+  securities: z.array(overlapSecuritySchema),
+  network: z.object({
+    securities: z.array(overlapSecuritySchema),
+    truncated: z.boolean(),
+    security_limit: z.number(),
+    edges: z.array(overlapOwnerSchema.extend({ security_id: z.string() })),
+  }),
+  summary: z.object({
+    common_count: z.number(),
+    shared_count: z.number(),
+    union_count: z.number(),
+    jaccard: z.number(),
+    weight_overlap: z.number(),
+  }),
+  pairwise: z.array(
+    z.object({
+      left: z.string(),
+      right: z.string(),
+      shared_count: z.number(),
+      jaccard: z.number(),
+      weight_overlap: z.number(),
+    }),
+  ),
+  changes: z.array(changeSchema.extend({ institution_id: z.string() })),
+  coverage_notes: z.array(z.string()),
+});
 export const companySchema = z.object({
   ticker: z.string(),
   available: z.boolean(),
   name: z.string(),
-  identity: z.object({
-    ticker: z.string(), cik: z.number(), name: z.string(),
-    exchange: z.string(), source_url: z.string(),
-  }).nullable().optional(),
-  availability_status: z.enum(["ready", "filings_only", "provider_error", "loading", "missing_filings", "unknown_symbol"]).optional(),
-  overview: z.object({
-    text: z.string(), source_url: z.string(), period: z.string(),
-  }).nullable().optional(),
-  filing_timeline: z.array(z.object({
-    form: z.string(), report_date: z.string(), filing_date: z.string(),
-    source_url: z.string(),
-  })).default([]),
+  identity: z
+    .object({
+      ticker: z.string(),
+      cik: z.number(),
+      name: z.string(),
+      exchange: z.string(),
+      source_url: z.string(),
+    })
+    .nullable()
+    .optional(),
+  availability_status: z
+    .enum([
+      "ready",
+      "filings_only",
+      "provider_error",
+      "loading",
+      "missing_filings",
+      "unknown_symbol",
+    ])
+    .optional(),
+  overview: z
+    .object({
+      text: z.string(),
+      source_url: z.string(),
+      period: z.string(),
+    })
+    .nullable()
+    .optional(),
+  filing_timeline: z
+    .array(
+      z.object({
+        form: z.string(),
+        report_date: z.string(),
+        filing_date: z.string(),
+        source_url: z.string(),
+      }),
+    )
+    .default([]),
   market: z
     .object({
       price: z.number().nullable().optional(),
@@ -227,7 +316,13 @@ export const companySearchSchema = z.object({
   error: z.string().nullable(),
 });
 export const companyResolveSchema = z.object({
-  status: z.enum(["resolved", "ambiguous", "unknown", "unsupported_market", "invalid"]),
+  status: z.enum([
+    "resolved",
+    "ambiguous",
+    "unknown",
+    "unsupported_market",
+    "invalid",
+  ]),
   company: companyIdentitySchema.nullable().optional(),
   matches: z.array(companyIdentitySchema),
   message: z.string().nullable(),
@@ -318,6 +413,7 @@ export const disclosureSchema = z.object({
 });
 
 export type Investor = z.infer<typeof investorSchema>;
+export type PortfolioOverlap = z.infer<typeof portfolioOverlapSchema>;
 export type Evidence = z.infer<typeof evidenceSchema>;
 export type Suggestion = z.infer<typeof suggestionSchema>;
 export type Thesis = z.infer<typeof thesisSchema>;

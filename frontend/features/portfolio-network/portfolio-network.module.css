@@ -1,0 +1,190 @@
+.shell {
+  position: relative;
+  overflow: hidden;
+  min-height: 560px;
+  border: 1px solid var(--color-border);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 60% 45%, rgb(53 214 238 / 8%), transparent 42%),
+    rgb(7 17 31 / 72%);
+  touch-action: none;
+}
+.canvas {
+  width: 100%;
+  min-width: 720px;
+  height: 560px;
+  display: block;
+  cursor: grab;
+}
+.canvas:active {
+  cursor: grabbing;
+}
+.edge {
+  stroke: rgb(82 126 153 / 42%);
+  transition:
+    opacity 320ms ease,
+    stroke 160ms ease;
+}
+.edgeShared {
+  stroke: rgb(53 214 238 / 62%);
+  filter: drop-shadow(0 0 3px rgb(53 214 238 / 30%));
+  animation: pulse 2.8s ease-in-out infinite alternate;
+}
+.institution {
+  fill: #102a40;
+  stroke: #4fd9ed;
+  stroke-width: 1.5;
+  transition:
+    transform 260ms ease,
+    opacity 260ms ease;
+}
+.security {
+  fill: #173150;
+  stroke: #6d91ff;
+  stroke-width: 1.4;
+  transition:
+    transform 260ms ease,
+    opacity 260ms ease;
+}
+.securityShared {
+  fill: #164459;
+  stroke: #63e6f8;
+  stroke-width: 2;
+  filter: drop-shadow(0 0 8px rgb(53 214 238 / 38%));
+}
+.node {
+  cursor: pointer;
+  outline: none;
+}
+.node:focus .institution,
+.node:focus .security {
+  stroke: #fff;
+  stroke-width: 3;
+}
+.node:hover .institution,
+.node:hover .security {
+  transform: scale(1.08);
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.label {
+  fill: #e7f0f8;
+  font-size: 12px;
+  font-weight: 700;
+  pointer-events: none;
+}
+.subLabel {
+  fill: #91a7ba;
+  font-size: 9px;
+  pointer-events: none;
+}
+.entering {
+  animation: enter 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.exiting {
+  pointer-events: none;
+  animation: exit 420ms ease both;
+}
+.controls {
+  position: absolute;
+  z-index: 2;
+  right: 12px;
+  top: 12px;
+  display: flex;
+  gap: 6px;
+}
+.control {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: rgb(11 24 40 / 92%);
+  color: #dffaff;
+}
+.tooltip {
+  position: absolute;
+  z-index: 3;
+  left: 14px;
+  bottom: 14px;
+  width: min(390px, calc(100% - 28px));
+  border: 1px solid rgb(53 214 238 / 35%);
+  border-radius: 14px;
+  background: rgb(8 20 34 / 96%);
+  box-shadow: 0 16px 34px rgb(0 0 0 / 30%);
+  padding: 14px;
+  pointer-events: none;
+}
+@keyframes pulse {
+  from {
+    opacity: 0.55;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes exit {
+  from {
+    opacity: 0.7;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@media (max-width: 720px) {
+  .shell {
+    min-height: 500px;
+    overflow-x: auto;
+  }
+  .canvas {
+    height: 500px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .edgeShared,
+  .entering,
+  .exiting {
+    animation: none;
+  }
+  .edge,
+  .institution,
+  .security {
+    transition: none;
+  }
+}
+:global(html[data-theme="light"]) .shell {
+  background:
+    radial-gradient(circle at 60% 45%, #d8f1f6, transparent 42%), #f7fbfd;
+}
+:global(html[data-theme="light"]) .institution {
+  fill: #e1f2f8;
+  stroke: #08718b;
+}
+:global(html[data-theme="light"]) .security {
+  fill: #e7eefb;
+  stroke: #526fc1;
+}
+:global(html[data-theme="light"]) .securityShared {
+  fill: #d4eef3;
+  stroke: #08718b;
+}
+:global(html[data-theme="light"]) .label {
+  fill: #172a39;
+}
+:global(html[data-theme="light"]) .subLabel {
+  fill: #516779;
+}
+:global(html[data-theme="light"]) .control,
+:global(html[data-theme="light"]) .tooltip {
+  background: rgb(255 255 255 / 96%);
+  color: #172a39;
+}
