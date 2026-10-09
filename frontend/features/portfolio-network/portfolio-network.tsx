@@ -254,9 +254,9 @@ function NetworkCanvas({
             <g
               key={security.id}
               className={`${styles.node} ${styles.entering}`}
-              role="link"
-              tabIndex={0}
-              aria-label={`Open research for ${security.ticker || security.issuer}`}
+              role={security.ticker ? "link" : undefined}
+              tabIndex={security.ticker ? 0 : undefined}
+              aria-label={security.ticker ? `Open research for ${security.ticker}` : undefined}
               transform={`translate(${point.x} ${point.y})`}
               onMouseEnter={() =>
                 setHover({ kind: "security", id: security.id })
