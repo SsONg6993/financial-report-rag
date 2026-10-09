@@ -18,9 +18,12 @@ from backend.research_context import comparisons, risk_cards, structured_answer
 from backend.suggestions import CATEGORIES, suggested_theses
 from backend.tickers import enrich_cached_classes
 from src.ask import answer_question
+from src.ask_intent import AskIntent, route_ask
 from src.company_directory import CompanyDirectory
 from src.config import AppConfig
 from src.decision import JevDecisionProvider
+from src.entry_price import estimate_entry_price
+from src.llm import generate_general_answer
 from src.local_store import LocalStore, utc_now
 from src.market import ResilientMarketProvider
 from src.portfolio_overlap import analyze_overlap
@@ -73,6 +76,7 @@ class ResearchService:
             RSSPublicUpdateProvider,
             WebsiteFeedProvider,
         )
+
         self.public_providers = {
             "rss": RSSPublicUpdateProvider(self.market_pulse),
             "official_disclosure": OfficialDisclosureProvider(self),
@@ -139,7 +143,8 @@ class ResearchService:
                 )
                 if not company:
                     raise RuntimeError(
-                        "; ".join(warnings) or "No supported SEC filings or facts available"
+                        "; ".join(warnings)
+                        or "No supported SEC filings or facts available"
                     )
                 for filing in comparable_filings(company.get("filings", [])):
                     try:
@@ -248,6 +253,38 @@ class ResearchService:
             freshness = (
                 f"Stale cached snapshot · holdings date {latest.reporting_period}"
             )
+        previous = snapshots[1] if len(snapshots) > 1 else None
+        previous_by_key = (
+            {holding.key: holding for holding in previous.holdings} if previous else {}
+        )
+        holdings = []
+        for holding in latest.holdings if latest else []:
+            ticker_verified = bool(
+                holding.ticker
+                and (
+                    holding.ticker_source
+                    or latest.source_type == "Official ARKK daily fund holdings"
+                    or "unambiguous exact issuer-name matches" in str(latest.notes)
+                )
+            )
+            market_rows = (
+                self.store.snapshots("market", holding.ticker)
+                if ticker_verified
+                else []
+            )
+            holdings.append(
+                {
+                    **asdict(holding),
+                    "ticker_verified": ticker_verified,
+                    "entry_price_estimate": estimate_entry_price(
+                        holding,
+                        previous_by_key.get(holding.key),
+                        previous,
+                        latest,
+                        market_rows[0] if market_rows else None,
+                    ),
+                }
+            )
         return {
             **asdict(institution),
             "style_tags": institution.style.split(" / "),
@@ -258,7 +295,7 @@ class ResearchService:
             "source_url": latest.source_url if latest else None,
             "freshness": freshness,
             "refresh": state,
-            "holdings": [asdict(h) for h in latest.holdings] if latest else [],
+            "holdings": holdings,
             "changes": [
                 {**c, "pct_change": c["share_change_pct"]}
                 for c in compare_portfolios(snapshots[1], latest)
@@ -273,12 +310,25 @@ class ResearchService:
                 }
                 for s in snapshots[:8]
             ],
-            "notes": [note for note in (
-                *(([latest.notes] if isinstance(latest.notes, str) else latest.notes)
-                  if latest else ["No usable disclosure cached. Refresh is attempted when this profile is opened."]),
-                institution.data_quality_notes,
-                institution.source_notes,
-            ) if note],
+            "notes": [
+                note
+                for note in (
+                    *(
+                        (
+                            [latest.notes]
+                            if isinstance(latest.notes, str)
+                            else latest.notes
+                        )
+                        if latest
+                        else [
+                            "No usable disclosure cached. Refresh is attempted when this profile is opened."
+                        ]
+                    ),
+                    institution.data_quality_notes,
+                    institution.source_notes,
+                )
+                if note
+            ],
             "rationale": "No sourced investor rationale available.",
         }
 
@@ -356,10 +406,14 @@ class ResearchService:
         if not data:
             failure = str(company_refresh.get("error") or "")
             availability = (
-                "unknown_symbol" if f"Ticker {ticker} was not found in the SEC ticker list" in failure
-                else "missing_filings" if "No supported SEC filings or facts available" in failure
-                else "provider_error" if failure
-                else "loading" if not company_refresh.get("checked_at")
+                "unknown_symbol"
+                if f"Ticker {ticker} was not found in the SEC ticker list" in failure
+                else "missing_filings"
+                if "No supported SEC filings or facts available" in failure
+                else "provider_error"
+                if failure
+                else "loading"
+                if not company_refresh.get("checked_at")
                 else "missing_filings"
             )
             return {
@@ -389,7 +443,11 @@ class ResearchService:
         annual = financials[-1] if financials else {}
         quarters = []
         facts_payload = {}
-        path = Path(os.getenv("THESISLENS_CACHE_DIR", "data/cache")) / ticker / "companyfacts.json"
+        path = (
+            Path(os.getenv("THESISLENS_CACHE_DIR", "data/cache"))
+            / ticker
+            / "companyfacts.json"
+        )
         if path.exists():
             facts_payload = json.loads(path.read_text(encoding="utf-8"))
             quarters = quarter_facts(facts_payload)
@@ -398,9 +456,14 @@ class ResearchService:
         )
         chunks = self.chunks(ticker)
         overview_chunk = next(
-            (chunk for chunk in chunks
-             if "business" in str(chunk.get("section_title", chunk.get("section", ""))).lower()
-             and chunk.get("source_url") and chunk.get("text")),
+            (
+                chunk
+                for chunk in chunks
+                if "business"
+                in str(chunk.get("section_title", chunk.get("section", ""))).lower()
+                and chunk.get("source_url")
+                and chunk.get("text")
+            ),
             None,
         )
         suggestions = suggested_theses(data, chunks)
@@ -479,17 +542,26 @@ class ResearchService:
             "available": True,
             "identity": identity,
             "availability_status": (
-                "provider_error" if company_refresh.get("error")
-                else "filings_only" if not financials else "ready"
+                "provider_error"
+                if company_refresh.get("error")
+                else "filings_only"
+                if not financials
+                else "ready"
             ),
             "overview": {
                 "text": overview_chunk["text"][:450],
                 "source_url": overview_chunk["source_url"],
                 "period": overview_chunk.get("period", ""),
-            } if overview_chunk else None,
+            }
+            if overview_chunk
+            else None,
             "filing_timeline": [
-                {"form": filing["form"], "report_date": filing["report_date"],
-                 "filing_date": filing["filing_date"], "source_url": filing["source_url"]}
+                {
+                    "form": filing["form"],
+                    "report_date": filing["report_date"],
+                    "filing_date": filing["filing_date"],
+                    "source_url": filing["source_url"],
+                }
                 for filing in data.get("filings", [])[:8]
             ],
             "name": (
@@ -637,21 +709,166 @@ class ResearchService:
             "as_of": utc_now(),
         }
 
-    def ask(self, question: str, ticker: str) -> dict:
-        if re.search(r"\b(public updates?|official updates?|latest (?:insider|institutional) (?:activity|filings?))\b", question, re.IGNORECASE):
-            category = "insiders" if re.search(r"\binsider\b", question, re.IGNORECASE) else (
-                "institutions" if re.search(r"\binstitutional\b", question, re.IGNORECASE) else "public_updates"
+    def ask(
+        self,
+        question: str,
+        ticker: str | None = None,
+        mode: str = "auto",
+    ) -> dict:
+        route = route_ask(question, mode, ticker)
+        metadata = {
+            "intent": route.intent.value,
+            "mode": mode,
+            "configuration_error": None,
+            "privacy": "No private workspace data was sent to an external model.",
+        }
+        if route.intent is AskIntent.GENERAL:
+            result = generate_general_answer(
+                question,
+                self.config.ollama_model,
+                self.config.ollama_base_url,
+                self.config.allow_remote_llm,
+            )
+            if not result.available:
+                return {
+                    **metadata,
+                    "answer": result.error or "General AI is unavailable.",
+                    "evidence": [],
+                    "source": "General AI configuration",
+                    "configuration_error": result.error,
+                }
+            privacy = (
+                "The question was sent to an explicitly enabled configured LLM endpoint; "
+                "no portfolio, filing, watchlist, or database content was included."
+                if self.config.allow_remote_llm
+                else "The question was sent only to the configured local Ollama service; "
+                "no portfolio, filing, watchlist, or database content was included."
+            )
+            return {
+                **metadata,
+                "answer": result.answer or "",
+                "evidence": [],
+                "source": f"General AI · {self.config.ollama_model}",
+                "privacy": privacy,
+            }
+        if route.intent is AskIntent.UNSUPPORTED:
+            return {
+                **metadata,
+                "answer": (
+                    "This request is unavailable in the selected mode. ThesisLens cannot "
+                    "access private accounts or execute transactions. For a general topic, "
+                    "switch to General mode; for research, name a company, filing, or investor."
+                ),
+                "evidence": [],
+                "source": "Intent and privacy guard",
+            }
+        if route.intent is AskIntent.CURRENT_PUBLIC_INFORMATION:
+            result = self.market_pulse.answer(question, route.ticker or "")
+            return {**result, **metadata}
+        if route.intent is AskIntent.PORTFOLIO_ANALYSIS and not route.ticker:
+            return {**self._portfolio_overview(question), **metadata}
+        if not route.ticker:
+            return {
+                **metadata,
+                "answer": (
+                    "A verified company context is required for financial research. "
+                    "Include a ticker such as AAPL or select Auto/General for a general question."
+                ),
+                "evidence": [],
+                "source": "Research context guard",
+            }
+        return {**self._ask_research(question, route.ticker), **metadata}
+
+    def _portfolio_overview(self, question: str) -> dict:
+        query = question.lower()
+        aliases = {
+            "buffett": "berkshire",
+            "ackman": "pershing",
+            "wood": "ark",
+            "burry": "scion",
+            "tepper": "appaloosa",
+            "druckenmiller": "duquesne",
+        }
+        selected = [
+            item.id
+            for item in self.registry.all()
+            if re.search(r"\b" + re.escape(item.id) + r"\b", query)
+            or any(alias in query and item.id == key for alias, key in aliases.items())
+        ]
+        selected = list(dict.fromkeys(selected))
+        if len(selected) >= 2:
+            data = self.portfolio_overlap(selected[:5])
+            summary = data["summary"]
+            jaccard = (
+                f"{summary['jaccard']:.1%}" if summary["jaccard"] is not None else "N/A"
+            )
+            answer = (
+                f"The selected disclosures contain {summary['shared_count']} security "
+                f"identity/identities held by at least two managers and "
+                f"{summary['common_count']} common to every selected manager. "
+                f"Jaccard similarity is {jaccard}. This describes reported overlap, "
+                "not shared intent."
+            )
+            evidence = [
+                {
+                    "text": f"{row['name']}: {row['holding_count']} disclosed holdings; "
+                    f"reporting period {row.get('reporting_period', 'unavailable')}.",
+                    "period": row.get("reporting_period", ""),
+                    "source_url": row.get("source_url", ""),
+                }
+                for row in data["institutions"]
+            ]
+            return {
+                "answer": answer,
+                "evidence": evidence,
+                "source": "Verified class-aware disclosure overlap",
+            }
+        return {
+            "answer": (
+                "Name two to five supported institutions to compare, or include a verified "
+                "ticker to inspect a disclosed position."
+            ),
+            "evidence": [],
+            "source": "Institutional portfolio routing",
+        }
+
+    def _ask_research(self, question: str, ticker: str) -> dict:
+        if re.search(
+            r"\b(public updates?|official updates?|latest (?:insider|institutional) (?:activity|filings?))\b",
+            question,
+            re.IGNORECASE,
+        ):
+            category = (
+                "insiders"
+                if re.search(r"\binsider\b", question, re.IGNORECASE)
+                else (
+                    "institutions"
+                    if re.search(r"\binstitutional\b", question, re.IGNORECASE)
+                    else "public_updates"
+                )
             )
             events = self.intelligence.feed(category, 20)["events"]
             ticker_events = [event for event in events if event["ticker"] == ticker]
             selected = (ticker_events or events)[:5]
-            evidence = [{"text": f"{event['headline']} Filed/published {event['published_at'][:10]}"
-                         + (f"; reporting period {event['reporting_period']}" if event["reporting_period"] else ""),
-                         "source_url": event["source_url"], "period": event["reporting_period"] or event["published_at"][:10]}
-                        for event in selected]
-            return {"answer": "\n\n".join(item["text"] for item in evidence)
-                    or "No matching dated official event is cached. This is not evidence of no real-world activity.",
-                    "evidence": evidence, "source": "Deterministic public-source event lookup"}
+            evidence = [
+                {
+                    "text": f"{event['headline']} Filed/published {event['published_at'][:10]}"
+                    + (
+                        f"; reporting period {event['reporting_period']}"
+                        if event["reporting_period"]
+                        else ""
+                    ),
+                    "source_url": event["source_url"],
+                    "period": event["reporting_period"] or event["published_at"][:10],
+                }
+                for event in selected
+            ]
+            return {
+                "answer": "\n\n".join(item["text"] for item in evidence)
+                or "No matching dated official event is cached. This is not evidence of no real-world activity.",
+                "evidence": evidence,
+                "source": "Deterministic public-source event lookup",
+            }
         symbols = re.findall(r"\b[A-Z][A-Z0-9.-]{0,11}\b", question)
         target = next(
             (

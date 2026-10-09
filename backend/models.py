@@ -29,6 +29,11 @@ class Holding(ResponseModel):
     put_call: str
     sector: str
     cusip: str
+    security_class: str = ""
+    share_type: str = "SH"
+    ticker_source: str = ""
+    ticker_verified: bool = False
+    entry_price_estimate: dict = Field(default_factory=dict)
 
 
 class PositionChange(ResponseModel):
@@ -111,3 +116,7 @@ class Answer(ResponseModel):
     answer: str
     evidence: list[Evidence]
     source: str
+    intent: str = "financial_research"
+    mode: str = "auto"
+    configuration_error: str | None = None
+    privacy: str = "No private workspace data was sent to an external model."

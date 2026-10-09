@@ -10,8 +10,11 @@ import {
   MessageCircleQuestion,
   Search,
   ShieldCheck,
+  Sparkles,
 } from "lucide-react";
+type AskMode = "auto" | "general" | "research";
 const examples = [
+  "How do you think medical AI will develop in the future?",
   "Which recent news may affect my watchlist?",
   "Why did Berkshire reduce AAPL?",
   "Which investors I follow disclose GOOGL?",
@@ -20,11 +23,12 @@ const examples = [
 ];
 export function AskResearch() {
   const [question, setQuestion] = useState("");
+  const [mode, setMode] = useState<AskMode>("auto");
   const m = useMutation({
     mutationFn: () =>
       api("/ask", answerSchema, {
         method: "POST",
-        body: JSON.stringify({ question, ticker: "AAPL" }),
+        body: JSON.stringify({ question, mode }),
       }),
   });
   return (
@@ -36,6 +40,26 @@ export function AskResearch() {
           m.mutate();
         }}
       >
+        <fieldset className="mb-4 flex flex-wrap items-center gap-2 border-b border-border/70 pb-4">
+          <legend className="mb-2 w-full text-xs font-semibold uppercase tracking-[0.12em] muted">
+            Answer mode
+          </legend>
+          {(["auto", "general", "research"] as AskMode[]).map((item) => (
+            <button
+              key={item}
+              type="button"
+              aria-pressed={mode === item}
+              className={`min-h-10 rounded-xl border px-4 text-sm capitalize transition ${mode === item ? "border-primary bg-primary/15 text-primary" : "border-border bg-background/40 muted"}`}
+              onClick={() => setMode(item)}
+            >
+              {item}
+            </button>
+          ))}
+          <span className="source !mt-0 sm:ml-2">
+            Auto routes locally. General never receives portfolio or filing
+            context.
+          </span>
+        </fieldset>
         <div className="flex gap-3">
           <span className="icon-shell mt-1 hidden shrink-0 sm:inline-flex">
             <MessageCircleQuestion size={18} aria-hidden />
@@ -61,7 +85,9 @@ export function AskResearch() {
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-border/70 pt-3">
           <p className="flex items-center gap-1.5 text-xs muted">
             <ShieldCheck size={14} className="text-primary" aria-hidden />
-            Grounded in dated local evidence.
+            {mode === "general"
+              ? "General AI uses only your question and configured model."
+              : "Financial answers stay grounded in dated local evidence."}
           </p>
           <Button
             type="submit"
@@ -97,8 +123,12 @@ export function AskResearch() {
               <BookOpenCheck size={18} aria-hidden />
             </span>
             <div>
-              <p className="eyebrow">Research response</p>
-              <h2 className="mt-1">What the evidence supports</h2>
+              <p className="eyebrow">{m.data.intent.replaceAll("_", " ")}</p>
+              <h2 className="mt-1">
+                {m.data.intent === "general"
+                  ? "General AI response"
+                  : "What the evidence supports"}
+              </h2>
             </div>
           </div>
           {m.data.sections ? (
@@ -163,12 +193,28 @@ export function AskResearch() {
               {m.data.answer}
             </p>
           )}
-          <details className="mt-5">
-            <summary className="text-sm text-primary">
-              Sources &amp; evidence ({m.data.evidence.length})
-            </summary>
-            <Sources evidence={m.data.evidence} />
-          </details>
+          {m.data.configuration_error && (
+            <div className="empty mt-5 text-left" role="alert">
+              <strong>General AI configuration required</strong>
+              <p className="mt-2 text-sm">{m.data.configuration_error}</p>
+            </div>
+          )}
+          {m.data.evidence.length > 0 && (
+            <details className="mt-5">
+              <summary className="text-sm text-primary">
+                Sources &amp; evidence ({m.data.evidence.length})
+              </summary>
+              <Sources evidence={m.data.evidence} />
+            </details>
+          )}
+          <p className="mt-5 flex items-start gap-2 text-xs muted">
+            <Sparkles
+              size={14}
+              className="mt-0.5 shrink-0 text-primary"
+              aria-hidden
+            />
+            {m.data.privacy}
+          </p>
           <p className="source">{m.data.source}</p>
         </article>
       )}

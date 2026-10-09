@@ -84,6 +84,102 @@ test("Ask has structured fallback with sources collapsed and no invented motive"
   });
 });
 
+test("general AI is intent-routed and fails explicitly when unconfigured", async ({
+  page,
+}) => {
+  await page.goto("/ask");
+  await page
+    .getByLabel("What would you like to investigate?")
+    .fill("How do you think medical AI will develop in the future?");
+  await page
+    .getByRole("button", { name: "Ask ThesisLens", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "General AI response", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("alert").getByText("General AI configuration required"),
+  ).toBeVisible();
+  const response = page.getByRole("article");
+  await expect(
+    response.getByText(/AAPL|Apple financial statements/i),
+  ).toHaveCount(0);
+  await expect(
+    response.getByText(
+      /No private workspace data was sent to an external model/,
+    ),
+  ).toBeVisible();
+  await page.screenshot({
+    path: `test-results/v31-general-ai-${test.info().project.name}.png`,
+    fullPage: true,
+  });
+});
+
+test("holdings preserve verified navigation and explain unknown cost", async ({
+  page,
+}) => {
+  await page.goto("/discover/berkshire");
+  const holding = page.locator("article.holding-grid").filter({
+    hasText: "APPLE INC",
+  });
+  await expect(holding.getByRole("link", { name: "Research" })).toHaveAttribute(
+    "href",
+    "/research/AAPL",
+  );
+  await holding.getByText(/Estimated entry price/).click();
+  await expect(
+    holding.getByText(/Actual purchase cost is unknown/),
+  ).toBeVisible();
+
+  await page.goto("/discover/pershing");
+  const unmapped = page.locator("article.holding-grid").filter({
+    hasText: "SYNTHETIC LONG ISSUER NAME WITHOUT VERIFIED TICKER MAPPING",
+  });
+  await expect(unmapped.getByText("Unmapped security")).toBeVisible();
+  await expect(
+    unmapped.getByText("No verified research mapping"),
+  ).toBeVisible();
+  await expect(unmapped.getByRole("link", { name: "Research" })).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: `test-results/v31-holdings-${test.info().project.name}.png`,
+    fullPage: true,
+  });
+});
+
+test("historical chart exposes real periods, top holdings, and source", async ({
+  page,
+}) => {
+  await page.goto("/discover");
+  await expect(
+    page.getByRole("heading", {
+      name: "Historical disclosed concentration",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "2026-03-31", exact: true }).click();
+  await expect(
+    page.getByRole("heading", {
+      name: "Berkshire Hathaway · 2026-03-31",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("No interpolation across missing periods"),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Original source ↗" }).last(),
+  ).toHaveAttribute("href", /sec\.gov/);
+  await page.screenshot({
+    path: `test-results/v31-history-${test.info().project.name}.png`,
+    fullPage: true,
+  });
+});
+
 test("Ask quarterly numbers and annual context stay separate", async ({
   page,
 }) => {

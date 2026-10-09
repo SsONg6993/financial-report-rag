@@ -89,10 +89,10 @@ test("real Home and Discover have dated disclosure data", async ({ page }) => {
     page.getByRole("heading", { name: "Featured investors" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Berkshire Hathaway" }),
+    page.getByRole("heading", { name: "Berkshire Hathaway", exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Coatue Management" }),
+    page.getByRole("heading", { name: "Coatue Management", exact: true }),
   ).toBeVisible();
   await page.screenshot({
     path: `test-results/discover-${test.info().project.name}.png`,
@@ -322,9 +322,10 @@ test("followed GOOGL disclosure answer stays factual and sourced", async ({
   await expect(
     page.getByRole("heading", { name: "What the evidence supports" }),
   ).toBeVisible();
-  await page.getByText(/Sources & evidence/).click();
+  const evidence = page.getByText(/Sources & evidence/);
   const sourceLinks = page.getByRole("link", { name: "Original source ↗" });
-  if (await sourceLinks.count()) {
+  if (await evidence.count()) {
+    await evidence.click();
     await expect(sourceLinks.first()).toHaveAttribute("href", /sec.gov/);
   } else {
     await expect(page.getByText(/No verified matching holdings/)).toBeVisible();

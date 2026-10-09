@@ -9,6 +9,7 @@ from backend.quarterly import quarter_facts, quarterly_changes
 from backend.service import ResearchService
 from backend.tickers import cover_class_tickers
 from src.company_directory import CompanyIdentity
+from src.llm import GenerationResult
 from src.local_store import LocalStore, utc_now
 from src.models import AnnualFinancials
 from src.portfolios import INSTITUTIONS, Holding, PortfolioSnapshot
@@ -20,9 +21,14 @@ def test_company_identity_api_contract(client, monkeypatch):
         CompanyIdentity("TSLA", 1318605, "Tesla, Inc.", "Nasdaq"),
         CompanyIdentity("KEYS", 1601046, "Keysight Technologies, Inc.", "NYSE"),
     ]
-    monkeypatch.setattr(main.company_directory, "load", lambda refresh=False: (
-        entries, {"checked_at": "2026-10-09T00:00:00+00:00", "stale": False, "error": None}
-    ))
+    monkeypatch.setattr(
+        main.company_directory,
+        "load",
+        lambda refresh=False: (
+            entries,
+            {"checked_at": "2026-10-09T00:00:00+00:00", "stale": False, "error": None},
+        ),
+    )
     suggestions = client.get("/api/companies/search", params={"q": "keysight"})
     assert suggestions.status_code == 200
     assert suggestions.json()["results"][0]["ticker"] == "KEYS"
@@ -35,12 +41,22 @@ def test_company_identity_api_contract(client, monkeypatch):
 
 def test_direct_company_page_distinguishes_unknown_symbol_from_provider_error(client):
     for ticker, error, expected in (
-        ("TESLA", "RuntimeError: SEC filing list unavailable: Ticker TESLA was not found in the SEC ticker list.", "unknown_symbol"),
+        (
+            "TESLA",
+            "RuntimeError: SEC filing list unavailable: Ticker TESLA was not found in the SEC ticker list.",
+            "unknown_symbol",
+        ),
         ("KEYS", "Timeout: SEC temporarily unavailable", "provider_error"),
-        ("EMPTY", "RuntimeError: No supported SEC filings or facts available", "missing_filings"),
+        (
+            "EMPTY",
+            "RuntimeError: No supported SEC filings or facts available",
+            "missing_filings",
+        ),
     ):
         main.service.store.save_snapshot(
-            "refresh", f"company:{ticker}", "current",
+            "refresh",
+            f"company:{ticker}",
+            "current",
             {"checked_at": utc_now(), "error": error, "warnings": []},
         )
         response = client.get(f"/api/company/{ticker}")
@@ -214,6 +230,51 @@ def test_watch_follow_and_sourced_ask(client):
     assert no_motive["evidence"]
     assert "does not provide the reason" in no_motive["sections"]["short_answer"]
     assert no_motive["sections"]["numbers"]
+
+
+def test_general_ask_never_falls_through_to_aapl(client, monkeypatch):
+    monkeypatch.setattr(
+        "backend.service.generate_general_answer",
+        lambda *args, **kwargs: GenerationResult(
+            "Medical AI is likely to develop through validated clinical workflows.",
+            True,
+        ),
+    )
+    answer = client.post(
+        "/api/ask",
+        json={
+            "question": "How do you think medical AI will develop in the future?",
+            "mode": "auto",
+        },
+    ).json()
+    assert answer["intent"] == "general"
+    assert "Medical AI" in answer["answer"]
+    assert "AAPL" not in str(answer)
+    assert answer["evidence"] == []
+
+
+def test_general_configuration_failure_is_explicit(client, monkeypatch):
+    monkeypatch.setattr(
+        "backend.service.generate_general_answer",
+        lambda *args, **kwargs: GenerationResult(
+            None, False, "General AI is not configured."
+        ),
+    )
+    answer = client.post(
+        "/api/ask",
+        json={"question": "Explain medical AI", "mode": "general"},
+    ).json()
+    assert answer["configuration_error"] == "General AI is not configured."
+    assert answer["source"] == "General AI configuration"
+
+
+def test_unknown_financial_ticker_does_not_substitute_aapl(client):
+    answer = client.post(
+        "/api/ask", json={"question": "What was ZZZZ revenue?", "mode": "auto"}
+    ).json()
+    assert answer["intent"] == "financial_research"
+    assert "AAPL" not in str(answer)
+    assert "ZZZZ" in answer["answer"]
 
 
 @pytest.mark.parametrize(
