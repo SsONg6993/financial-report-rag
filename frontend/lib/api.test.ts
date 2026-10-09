@@ -48,3 +48,20 @@ it("provides an actionable API failure", async () => {
   );
   await expect(api("/test", z.unknown())).rejects.toThrow("saved work is safe");
 });
+
+it("distinguishes backend network failure from an HTTP response", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")));
+  await expect(api("/test", z.unknown())).rejects.toThrow(
+    "Backend unavailable",
+  );
+});
+
+it("identifies an API HTTP 500", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(new Response("", { status: 500 })),
+  );
+  await expect(api("/market-pulse", z.unknown())).rejects.toThrow(
+    "HTTP 500 for /api/market-pulse",
+  );
+});

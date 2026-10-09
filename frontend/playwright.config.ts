@@ -6,13 +6,22 @@ const db = path.join(root, ".e2e-runtime", "thesislens-e2e.sqlite3");
 const api = "http://127.0.0.1:18765";
 const app = "http://127.0.0.1:13000";
 if (process.env.PRODUCT_QA_URL && process.env.PRODUCT_QA_URL !== app) {
-  throw new Error("E2E refuses an external frontend URL; use the isolated Playwright server.");
+  throw new Error(
+    "E2E refuses an external frontend URL; use the isolated Playwright server.",
+  );
 }
 if (process.env.PRODUCT_QA_API && process.env.PRODUCT_QA_API !== api) {
-  throw new Error("E2E refuses an external API URL; use the isolated Playwright backend.");
+  throw new Error(
+    "E2E refuses an external API URL; use the isolated Playwright backend.",
+  );
 }
-if (process.env.THESISLENS_DB && path.resolve(process.env.THESISLENS_DB) !== db) {
-  throw new Error("E2E refuses a personal THESISLENS_DB; the test database is fixed and isolated.");
+if (
+  process.env.THESISLENS_DB &&
+  path.resolve(process.env.THESISLENS_DB) !== db
+) {
+  throw new Error(
+    "E2E refuses a personal THESISLENS_DB; the test database is fixed and isolated.",
+  );
 }
 export default defineConfig({
   testDir: "./e2e",
@@ -28,9 +37,15 @@ export default defineConfig({
       url: `${api}/api/health`,
       reuseExistingServer: false,
       timeout: 60_000,
-      env: { THESISLENS_DB: db, THESISLENS_E2E_DB: db,
+      env: {
+        THESISLENS_DB: db,
+        THESISLENS_E2E_DB: db,
         THESISLENS_CACHE_DIR: path.join(root, ".e2e-runtime", "cache"),
-        THESISLENS_OFFLINE: "true", ENABLE_JEV: "false" },
+        THESISLENS_OFFLINE: "true",
+        ENABLE_JEV: "false",
+        OLLAMA_BASE_URL: "http://127.0.0.1:1",
+        OLLAMA_MODEL: "qwen3:4b",
+      },
     },
     {
       command: "npm run dev -- --hostname 127.0.0.1 --port 13000",

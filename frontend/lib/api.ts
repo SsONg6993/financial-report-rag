@@ -445,6 +445,16 @@ export const answerSchema = z.object({
     .default("financial_research"),
   mode: z.enum(["auto", "general", "research"]).default("auto"),
   configuration_error: z.string().nullable().optional(),
+  configuration_error_code: z
+    .enum([
+      "remote_llm_disabled",
+      "ollama_service_not_running",
+      "ollama_model_missing",
+      "ollama_timeout",
+      "ollama_invalid_response",
+    ])
+    .nullable()
+    .optional(),
   privacy: z
     .string()
     .default("No private workspace data was sent to an external model."),
@@ -494,15 +504,27 @@ export async function api<T>(
   schema: z.ZodType<T>,
   options?: RequestInit,
 ): Promise<T> {
-  const response = await fetch(`/api${path}`, {
-    ...options,
-    headers: { "Content-Type": "application/json", ...options?.headers },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`/api${path}`, {
+      ...options,
+      headers: { "Content-Type": "application/json", ...options?.headers },
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError")
+      throw error;
+    throw new ApiError(
+      "Backend unavailable. Start the Python API and retry; your saved work is safe.",
+      0,
+    );
+  }
   if (!response.ok)
     throw new ApiError(
       response.status === 422
         ? "Please check the information you entered."
-        : "The research service is unavailable. Your saved work is safe; please retry.",
+        : response.status === 500
+          ? `The API returned HTTP 500 for /api${path}. The backend is running but this request failed.`
+          : "The research service is unavailable. Your saved work is safe; please retry.",
       response.status,
     );
   const parsed = schema.safeParse(await response.json());

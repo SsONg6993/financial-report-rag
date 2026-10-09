@@ -1,7 +1,13 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 import type { z } from "zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -31,11 +37,21 @@ import {
 } from "@/lib/api";
 
 const investorTerms: Record<string, string> = {
-  berkshire: "berkshire", buffett: "berkshire", pershing: "pershing",
-  ackman: "pershing", burry: "scion", scion: "scion", ark: "ark",
-  cathie: "ark", appaloosa: "appaloosa", tepper: "appaloosa",
-  bridgewater: "bridgewater", duquesne: "duquesne",
-  druckenmiller: "duquesne", soros: "soros", tiger: "tiger",
+  berkshire: "berkshire",
+  buffett: "berkshire",
+  pershing: "pershing",
+  ackman: "pershing",
+  burry: "scion",
+  scion: "scion",
+  ark: "ark",
+  cathie: "ark",
+  appaloosa: "appaloosa",
+  tepper: "appaloosa",
+  bridgewater: "bridgewater",
+  duquesne: "duquesne",
+  druckenmiller: "duquesne",
+  soros: "soros",
+  tiger: "tiger",
   coatue: "coatue",
 };
 
@@ -43,7 +59,9 @@ export function SearchBox() {
   const router = useRouter();
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
-  const [suggestions, setSuggestions] = useState<z.infer<typeof companySearchSchema>["results"]>([]);
+  const [suggestions, setSuggestions] = useState<
+    z.infer<typeof companySearchSchema>["results"]
+  >([]);
   const [searching, setSearching] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [directoryStale, setDirectoryStale] = useState(false);
@@ -68,7 +86,9 @@ export function SearchBox() {
       } catch {
         if (!controller.signal.aborted) {
           setSuggestions([]);
-          setError("Company directory is temporarily unavailable. Your saved research is unaffected.");
+          setError(
+            "Company directory is temporarily unavailable. Your saved research is unaffected.",
+          );
         }
       } finally {
         if (!controller.signal.aborted) setSearching(false);
@@ -84,8 +104,8 @@ export function SearchBox() {
     event.preventDefault();
     const q = query.trim();
     if (!q) return;
-    const investor = Object.keys(investorTerms).find((term) =>
-      q.toLowerCase() === term,
+    const investor = Object.keys(investorTerms).find(
+      (term) => q.toLowerCase() === term,
     );
     if (investor) {
       router.push("/discover/" + investorTerms[investor]);
@@ -108,7 +128,9 @@ export function SearchBox() {
         setError(result.message ?? "Select a specific company listing.");
       }
     } catch {
-      setError("SEC company lookup is unavailable. Retry shortly; saved research is unaffected.");
+      setError(
+        "SEC company lookup is unavailable. Retry shortly; saved research is unaffected.",
+      );
     } finally {
       setSubmitting(false);
     }
@@ -159,33 +181,62 @@ export function SearchBox() {
         </Button>
       </div>
       {showSuggestions && query.trim().length >= 2 && (
-        <div className="absolute z-30 mt-2 w-full overflow-hidden rounded-2xl border border-border bg-card p-2 shadow-2xl" aria-label="Company suggestions">
-          {searching && <p className="px-3 py-2 text-sm muted">Searching the SEC directory…</p>}
+        <div
+          className="absolute z-30 mt-2 w-full overflow-hidden rounded-2xl border border-border bg-card p-2 shadow-2xl"
+          aria-label="Company suggestions"
+        >
+          {searching && (
+            <p className="px-3 py-2 text-sm muted">
+              Searching the SEC directory…
+            </p>
+          )}
           {!searching && suggestions.length === 0 && !error && (
-            <p className="px-3 py-2 text-sm muted">No SEC company suggestion yet.</p>
+            <p className="px-3 py-2 text-sm muted">
+              No SEC company suggestion yet.
+            </p>
           )}
           {suggestions.map((item, index) => (
             <button
               key={item.ticker + item.cik}
-              ref={(node) => { suggestionButtons.current[index] = node; }}
+              ref={(node) => {
+                suggestionButtons.current[index] = node;
+              }}
               type="button"
               onClick={() => choose(item.ticker)}
               onKeyDown={(event) => {
                 if (event.key === "Escape") setShowSuggestions(false);
-                if (event.key === "ArrowDown") suggestionButtons.current[index + 1]?.focus();
-                if (event.key === "ArrowUp") suggestionButtons.current[index - 1]?.focus();
+                if (event.key === "ArrowDown")
+                  suggestionButtons.current[index + 1]?.focus();
+                if (event.key === "ArrowUp")
+                  suggestionButtons.current[index - 1]?.focus();
               }}
               className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left hover:bg-accent focus-visible:bg-accent"
             >
-              <span className="min-w-0"><strong className="block truncate text-sm">{item.name}</strong><span className="text-xs muted">{item.exchange || "Exchange not listed"}</span></span>
-              <span className="rounded-lg border border-border px-2 py-1 text-xs text-primary">{item.ticker}</span>
+              <span className="min-w-0">
+                <strong className="block truncate text-sm">{item.name}</strong>
+                <span className="text-xs muted">
+                  {item.exchange || "Exchange not listed"}
+                </span>
+              </span>
+              <span className="rounded-lg border border-border px-2 py-1 text-xs text-primary">
+                {item.ticker}
+              </span>
             </button>
           ))}
-          {directoryStale && <p className="px-3 py-2 text-xs text-amber-300">Using the last verified SEC directory; refresh is temporarily unavailable.</p>}
+          {directoryStale && (
+            <p className="px-3 py-2 text-xs text-amber-300">
+              Using the last verified SEC directory; refresh is temporarily
+              unavailable.
+            </p>
+          )}
         </div>
       )}
       {error && (
-        <p id="company-search-error" role="alert" className="mt-2 text-sm text-destructive">
+        <p
+          id="company-search-error"
+          role="alert"
+          className="mt-2 text-sm text-destructive"
+        >
           {error}
         </p>
       )}
@@ -282,13 +333,19 @@ export function Loading() {
     </div>
   );
 }
-export function ErrorState({ retry }: { retry: () => void }) {
+export function ErrorState({
+  retry,
+  error,
+}: {
+  retry: () => void;
+  error?: Error | null;
+}) {
   return (
     <div role="alert" className="empty mt-8">
       <h2>Research is temporarily unavailable</h2>
       <p className="mt-2 mb-4">
-        Your saved work is safe. Check that the Python research service is
-        running, then try again.
+        {error?.message ??
+          "Your saved work is safe. Check that the Python research service is running, then try again."}
       </p>
       <Button onClick={retry}>Try again</Button>
     </div>

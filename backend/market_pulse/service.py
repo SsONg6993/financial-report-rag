@@ -107,6 +107,7 @@ class MarketPulseService:
         self.clock = clock or (lambda: datetime.now(UTC))
         self._lock = threading.Lock()
         self._inflight = False
+        self._skipped_candidate_count = 0
 
     def state(self, provider):
         snapshots = self.store.snapshots("pulse_provider", provider.id)
@@ -246,7 +247,7 @@ class MarketPulseService:
 
     def candidates(self, portfolio, extra=None):
         # Watchlist and followed holdings determine candidate coverage, not impact.
-        tickers = list(
+        raw_tickers = list(
             dict.fromkeys(
                 [
                     *(extra or []),
@@ -262,6 +263,20 @@ class MarketPulseService:
                 ]
             )
         )
+        tickers = []
+        skipped = 0
+        for value in raw_tickers:
+            if not isinstance(value, str):
+                skipped += 1
+                continue
+            ticker = value.strip().upper()
+            if not re.fullmatch(r"[A-Z0-9.-]{1,12}", ticker):
+                # Provider-specific symbols such as "RKLB UQ" are retained in
+                # their original disclosure, but are not safe SEC identifiers.
+                skipped += 1
+                continue
+            tickers.append(ticker)
+        self._skipped_candidate_count = skipped
         return tickers[:60]
 
     def impacts(self, event, extra=None, portfolio=None, exposures=None):
@@ -395,6 +410,19 @@ class MarketPulseService:
             }
             for p in self.providers
         ]
+        provider_errors = [state for state in states if state["error"]]
+        if events and provider_errors:
+            status = "stale_cache"
+            diagnostic = "Some public sources are unavailable; retained cached events remain visible."
+        elif events:
+            status = "ready"
+            diagnostic = "Cached public-source events are available."
+        elif provider_errors:
+            status = "source_unavailable"
+            diagnostic = "Market Pulse sources are unavailable and no successful cached events exist."
+        else:
+            status = "empty_cache"
+            diagnostic = "No public-source market events are cached yet."
         return {
             "events": events[:24],
             "providers": states,
@@ -404,6 +432,9 @@ class MarketPulseService:
             ),
             "coverage": "Exposure checks use cached company filings and official issuer releases. No missing exposure is inferred.",
             "candidate_limit": 60,
+            "status": status,
+            "diagnostic": diagnostic,
+            "skipped_candidate_count": self._skipped_candidate_count,
         }
 
     def detail(self, event_id):

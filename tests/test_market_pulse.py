@@ -132,7 +132,9 @@ def test_failure_retains_cache_and_cooldown(pulse):
     provider.fail = True
     pulse.refresh()
     assert len(pulse.events()) == 1
-    assert pulse.feed()["events"][0]["stale"]
+    feed = pulse.feed()
+    assert feed["events"][0]["stale"]
+    assert feed["status"] == "stale_cache"
     assert pulse.state(provider)["successful_at"] == NOW.isoformat()
     assert pulse.state(provider)["etag"] == "etag"
 
@@ -151,6 +153,31 @@ def test_empty_304_does_not_create_fake_success(pulse):
     pulse.refresh()
     assert pulse.state(pulse.providers[0])["error"]
     assert not pulse.events()
+    assert pulse.feed()["status"] == "source_unavailable"
+
+
+def test_empty_cache_is_distinct_from_source_failure(pulse):
+    feed = pulse.feed()
+    assert feed["events"] == []
+    assert feed["status"] == "empty_cache"
+    assert "No public-source market events" in feed["diagnostic"]
+
+
+def test_provider_symbol_suffix_does_not_crash_feed(pulse):
+    pulse.portfolio_map = lambda: {"RKLB UQ": []}
+    feed = pulse.feed()
+    assert feed["events"] == []
+    assert feed["skipped_candidate_count"] == 1
+    assert feed["status"] == "empty_cache"
+
+
+def test_market_pulse_api_returns_200_with_invalid_provider_symbol(pulse, monkeypatch):
+    pulse.portfolio_map = lambda: {"RKLB UQ": []}
+    monkeypatch.setattr(main.service, "market_pulse", pulse)
+    with TestClient(main.app) as client:
+        response = client.get("/api/market-pulse")
+    assert response.status_code == 200
+    assert response.json()["skipped_candidate_count"] == 1
 
 
 def test_supported_fuel_cost_mechanism_not_price_prediction():

@@ -21,6 +21,14 @@ const examples = [
   "What changed in AAPL’s latest quarter?",
   "What idea should I track for NVDA?",
 ];
+const generalErrorTitle = (code?: string | null) => {
+  if (code === "ollama_service_not_running")
+    return "Ollama service is not running";
+  if (code === "ollama_model_missing") return "Ollama model is missing";
+  if (code === "ollama_timeout") return "Ollama response timed out";
+  if (code === "remote_llm_disabled") return "Remote LLM access is disabled";
+  return "General AI configuration error";
+};
 export function AskResearch() {
   const [question, setQuestion] = useState("");
   const [mode, setMode] = useState<AskMode>("auto");
@@ -195,7 +203,9 @@ export function AskResearch() {
           )}
           {m.data.configuration_error && (
             <div className="empty mt-5 text-left" role="alert">
-              <strong>General AI configuration required</strong>
+              <strong>
+                {generalErrorTitle(m.data.configuration_error_code)}
+              </strong>
               <p className="mt-2 text-sm">{m.data.configuration_error}</p>
             </div>
           )}

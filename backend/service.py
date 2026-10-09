@@ -720,6 +720,7 @@ class ResearchService:
             "intent": route.intent.value,
             "mode": mode,
             "configuration_error": None,
+            "configuration_error_code": None,
             "privacy": "No private workspace data was sent to an external model.",
         }
         if route.intent is AskIntent.GENERAL:
@@ -736,6 +737,7 @@ class ResearchService:
                     "evidence": [],
                     "source": "General AI configuration",
                     "configuration_error": result.error,
+                    "configuration_error_code": result.error_code,
                 }
             privacy = (
                 "The question was sent to an explicitly enabled configured LLM endpoint; "
