@@ -98,6 +98,15 @@ function Invoke-LocalJson([string]$Uri, [int]$TimeoutSeconds = 3) {
     }
 }
 
+function Get-LocalProbeBaseUrl([uri]$Uri) {
+    if ($Uri.Host -notin @("localhost", "127.0.0.1", "::1")) {
+        throw "Refusing to probe a non-local service endpoint."
+    }
+    $builder = [UriBuilder]$Uri
+    if ($builder.Host -in @("localhost", "::1")) { $builder.Host = "127.0.0.1" }
+    return $builder.Uri.AbsoluteUri.TrimEnd('/')
+}
+
 function Get-PortOwner([int]$Port) {
     try {
         $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop)
@@ -327,7 +336,8 @@ function Start-Or-ReuseOllama([hashtable]$State) {
     if ($uri.Host -notin @("localhost", "127.0.0.1", "::1")) {
         throw "Configured Ollama endpoint is not local. ThesisLens will not enable a remote LLM automatically."
     }
-    $tags = Invoke-LocalJson ($baseUrl.TrimEnd('/') + "/api/tags") 3
+    $probeBaseUrl = Get-LocalProbeBaseUrl $uri
+    $tags = Invoke-LocalJson ($probeBaseUrl + "/api/tags") 3
     if (-not $tags) {
         $ollama = Resolve-OllamaExecutable
         if (-not $ollama) {
@@ -346,7 +356,7 @@ function Start-Or-ReuseOllama([hashtable]$State) {
             managed = $true
         }
         Write-RuntimeState $State
-        $tags = Wait-ForJson ($baseUrl.TrimEnd('/') + "/api/tags") 60
+        $tags = Wait-ForJson ($probeBaseUrl + "/api/tags") 60
         if (-not $tags) {
             Write-RuntimeLog "WARN" "Ollama was started but is still unavailable after the readiness window."
             return @{ status = "loading"; model = $model }

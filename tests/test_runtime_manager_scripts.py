@@ -56,6 +56,27 @@ $result | ConvertTo-Json -Compress
     ]
 
 
+def test_local_ollama_probe_normalizes_localhost_but_rejects_remote_hosts():
+    script = f"""
+Import-Module '{MODULE}' -Force
+$module = Get-Module ThesisLens.Runtime
+$result = & $module {{
+  $local = Get-LocalProbeBaseUrl ([uri]'http://localhost:11434')
+  $remoteRejected = $false
+  try {{ Get-LocalProbeBaseUrl ([uri]'https://example.invalid') | Out-Null }} catch {{ $remoteRejected = $true }}
+  [pscustomobject]@{{local=$local;remote_rejected=$remoteRejected}}
+}}
+$result | ConvertTo-Json -Compress
+"""
+    result = powershell(script)
+    assert result.returncode == 0, result.stderr + result.stdout
+    parsed = json.loads(result.stdout.strip())
+    assert parsed == {
+        "local": "http://127.0.0.1:11434",
+        "remote_rejected": True,
+    }
+
+
 def test_status_command_does_not_print_environment_secrets():
     source = (ROOT / "status-thesislens.ps1").read_text(encoding="utf-8")
     assert "TELEGRAM" not in source
