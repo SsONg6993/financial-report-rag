@@ -44,6 +44,7 @@ export function Navigation() {
           {[
             ["Discover", "/discover"],
             ["Research", "/research"],
+            ["Intelligence", "/intelligence"],
             ["Market Pulse", "/market-pulse"],
             ["Ask", "/ask"],
             ["Status", "/status"],
@@ -64,7 +65,11 @@ export function Navigation() {
           aria-label={light ? "Switch to dark mode" : "Switch to light mode"}
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-primary transition hover:bg-accent"
         >
-          {light ? <Moon size={17} aria-hidden /> : <Sun size={17} aria-hidden />}
+          {light ? (
+            <Moon size={17} aria-hidden />
+          ) : (
+            <Sun size={17} aria-hidden />
+          )}
         </button>
       </div>
     </header>

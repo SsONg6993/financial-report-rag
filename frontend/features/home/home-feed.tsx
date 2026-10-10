@@ -1,214 +1,229 @@
 "use client";
+
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { api, homeSchema, percent } from "@/lib/api";
-import {
-  BellRing,
-  Binoculars,
-  Building2,
-  Eye,
-  ShieldAlert,
-} from "lucide-react";
+import { ArrowUpRight, Building2, CircleAlert } from "lucide-react";
+import { api, homeSchema, money, percent } from "@/lib/api";
 import {
   ActivityBadge,
   ErrorState,
   Freshness,
   Loading,
-  ResearchLink,
   Section,
-  WatchButton,
 } from "@/components/research-ui";
-export function HomeFeed() {
-  const q = useQuery({
+
+export function HomeFeed({ highlights }: { highlights: ReactNode }) {
+  const feed = useQuery({
     queryKey: ["home"],
     queryFn: ({ signal }) => api("/home/feed", homeSchema, { signal }),
     refetchInterval: 120_000,
   });
-  if (q.isPending) return <Loading />;
-  if (q.isError) return <ErrorState retry={() => q.refetch()} />;
-  const d = q.data;
+  if (feed.isPending) return <Loading />;
+  if (feed.isError) return <ErrorState retry={() => feed.refetch()} />;
+  const data = feed.data;
+  const quotes = data.market_overview.filter((quote) => quote.available);
   return (
     <>
       <Section
-        title="Top Investor Activity"
+        title="Market Overview"
         aside={
-          <Link href="/discover" className="text-sm text-primary">
-            Explore investors →
+          <Link href="/market-pulse" className="text-sm text-primary">
+            Market Pulse →
           </Link>
         }
       >
-        <p className="muted text-sm mb-4">
-          Verified changes from the latest available disclosure. These are not
-          real-time trades and do not explain an investor’s motivation.
+        {quotes.length ? (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {quotes.slice(0, 4).map((quote) => (
+              <Link
+                href={`/research/${quote.ticker}`}
+                className="panel group"
+                key={quote.ticker}
+              >
+                <div className="flex items-center justify-between">
+                  <strong>{quote.ticker}</strong>
+                  <ArrowUpRight
+                    size={16}
+                    className="text-primary"
+                    aria-hidden
+                  />
+                </div>
+                <p className="metric mt-3">{money(quote.price)}</p>
+                <p
+                  className={`mt-1 text-sm ${quote.change != null && quote.change < 0 ? "text-amber-300" : "text-primary"}`}
+                >
+                  {quote.change == null
+                    ? "Daily change unavailable"
+                    : `${quote.change >= 0 ? "+" : ""}${percent(quote.change)}`}
+                </p>
+                <p className="source">
+                  {quote.status} ·{" "}
+                  {quote.quote_as_of?.slice(0, 10) ?? "date unavailable"}
+                </p>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <div className="empty text-left">
+            <h3>Saved market quotes are not available</h3>
+            <p className="mt-2">
+              Company filings and institutional disclosures remain usable.
+              Quotes appear only after a configured provider returns dated data.
+            </p>
+          </div>
+        )}
+      </Section>
+      <Section
+        title="My Watchlist"
+        aside={
+          <Link href="/research" className="text-sm text-primary">
+            Research a company →
+          </Link>
+        }
+      >
+        {data.watchlist.length ? (
+          <div className="overflow-x-auto">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Company</th>
+                  <th scope="col">Tracked ideas</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">
+                    <span className="sr-only">Open</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.watchlist.map((item) => (
+                  <tr key={item.ticker}>
+                    <th scope="row">{item.ticker}</th>
+                    <td>{item.tracked}</td>
+                    <td>
+                      {item.attention
+                        ? `${item.attention} need review`
+                        : item.available
+                          ? "Evidence available"
+                          : "Awaiting evidence"}
+                    </td>
+                    <td>
+                      <Link
+                        href={`/research/${item.ticker}`}
+                        className="text-primary"
+                      >
+                        Open →
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="empty">
+            No companies saved yet. Add one from Research to monitor its
+            evidence.
+          </div>
+        )}
+      </Section>
+      {highlights}
+      <Section
+        title="Institutional Activity"
+        aside={
+          <Link href="/discover" className="text-sm text-primary">
+            Compare investors →
+          </Link>
+        }
+      >
+        <p className="muted mb-4 text-sm">
+          Latest comparable saved disclosures. 13F reports are delayed and
+          incomplete.
         </p>
-        <div className="grid-cards">
-          {d.activity.slice(0, 6).map((a, i) => (
-            <article className="panel group" key={i}>
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-center gap-3">
+        {data.activity.length ? (
+          <div className="space-y-3">
+            {data.activity.slice(0, 4).map((item, index) => (
+              <article
+                className="panel flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+                key={`${item.institution_id}-${item.ticker}-${index}`}
+              >
+                <div className="flex items-start gap-3">
                   <span className="icon-shell">
-                    <Building2 size={18} aria-hidden />
+                    <Building2 size={17} aria-hidden />
                   </span>
                   <div>
                     <Link
-                      href={"/discover/" + a.institution_id}
-                      className="text-sm font-semibold hover:text-primary"
+                      href={`/discover/${item.institution_id}`}
+                      className="font-semibold hover:text-primary"
                     >
-                      {a.institution}
+                      {item.institution}
                     </Link>
-                    <p className="source !mt-0">Public portfolio disclosure</p>
+                    <p className="muted text-sm">
+                      {item.ticker || item.issuer} ·{" "}
+                      {item.pct_change == null
+                        ? "new or exited position"
+                        : percent(item.pct_change)}
+                    </p>
+                    <Freshness
+                      type={item.source_type}
+                      period={item.current_period ?? item.reporting_period}
+                      filed={item.filing_date}
+                      freshness={item.freshness}
+                    />
                   </div>
                 </div>
-                <ActivityBadge activity={a.activity} />
-              </div>
-              <div className="mt-5 flex items-end justify-between gap-3">
-                <div>
-                  <h3 className="text-xl">{a.ticker || a.issuer}</h3>
-                  {a.ticker && a.issuer && (
-                    <p className="muted text-sm">{a.issuer}</p>
+                <div className="flex items-center gap-3">
+                  <ActivityBadge activity={item.activity} />
+                  {item.ticker && (
+                    <Link
+                      href={`/research/${item.ticker}`}
+                      className="text-sm text-primary"
+                    >
+                      Research →
+                    </Link>
                   )}
                 </div>
-                <span className="font-mono text-sm">
-                  {a.pct_change === null
-                    ? "New / exited position"
-                    : percent(a.pct_change)}
-                </span>
-              </div>
-              {a.ticker && (
-                <Link
-                  className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-primary"
-                  href={"/research/" + a.ticker}
-                >
-                  Open company research →
-                </Link>
-              )}
-              <Freshness
-                type={a.source_type}
-                period={a.current_period ?? a.reporting_period}
-                filed={a.filing_date}
-                freshness={a.freshness}
-              />
-              {a.source_url && (
-                <a
-                  className="source inline-block"
-                  href={a.source_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  View disclosure ↗
-                </a>
-              )}
-            </article>
-          ))}
-        </div>
-        {!d.activity.length && (
+              </article>
+            ))}
+          </div>
+        ) : (
           <div className="empty">
-            No comparable disclosures loaded yet. Start with a featured investor
-            below.
+            No comparable saved institutional changes are available yet.
           </div>
         )}
       </Section>
-      <Section title="Interesting Ideas">
-        <p className="muted text-sm mb-4">
-          ThesisLens analysis, not the investor’s stated rationale.
-        </p>
-        <div className="grid-cards">
-          {d.ideas.map((i) => (
-            <article key={i.ticker} className="panel">
-              <div className="flex items-center justify-between gap-3">
-                <span className="icon-shell">
-                  <Binoculars size={18} aria-hidden />
-                </span>
-                <span className="pill">Research starting point</span>
-              </div>
-              <h3 className="mt-4 text-2xl">{i.ticker}</h3>
-              <p className="mt-1 text-sm font-medium">Why it’s on the radar</p>
-              <ul className="mt-4 space-y-2 text-sm muted">
-                {i.reasons.slice(0, 2).map((r) => (
-                  <li className="flex gap-2" key={r}>
-                    <Eye
-                      className="mt-0.5 shrink-0 text-primary"
-                      size={15}
-                      aria-hidden
-                    />
-                    {r}
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-4 flex gap-2 rounded-xl bg-muted/35 p-3 text-xs muted">
-                <ShieldAlert
-                  className="shrink-0 text-amber-300"
-                  size={15}
-                  aria-hidden
-                />
-                Disclosure timing may differ from the investor’s current
-                position.
-              </p>
-              <p className="source">
-                Period {i.period} ·{" "}
-                <a
-                  href={i.source_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Disclosure ↗
-                </a>
-              </p>
-              <div className="mt-5 flex flex-wrap gap-2">
-                <ResearchLink ticker={i.ticker} />
-                <WatchButton ticker={i.ticker} enabled={i.watchlisted} />
-              </div>
-            </article>
-          ))}
-        </div>
-        {!d.ideas.length && (
-          <div className="empty">
-            Verified ticker mappings and evidence will populate ideas here.
-            Nothing is fabricated.
+      <Section title="Quick Research">
+        <div className="panel grid gap-5 md:grid-cols-[1fr_auto] md:items-center">
+          <div>
+            <h3>Start with a company, investor, or question</h3>
+            <p className="muted mt-2 text-sm">
+              Research uses verified filings and saved public disclosures;
+              General mode uses your local Ollama configuration.
+            </p>
           </div>
-        )}
-      </Section>
-      <Section title="My Watchlist">
-        <div className="grid-cards">
-          {d.watchlist.map((w) => (
-            <Link
-              className="panel group hover:border-primary/40"
-              href={"/research/" + w.ticker}
-              key={w.ticker}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <span className="icon-shell">
-                  <BellRing size={18} aria-hidden />
-                </span>
-                <span className="pill">
-                  {w.attention ? `${w.attention} to review` : "Up to date"}
-                </span>
-              </div>
-              <h3 className="mt-4 text-xl">{w.ticker}</h3>
-              <p className="muted mt-3">
-                {w.tracked
-                  ? w.tracked +
-                    " ideas tracked · " +
-                    w.attention +
-                    " need review"
-                  : w.available
-                    ? "Explore financial changes and ideas to track"
-                    : "Company evidence not yet available"}
-              </p>
-              <span className="text-primary text-sm">Continue research →</span>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/research" className="pill border-primary text-primary">
+              Company research
             </Link>
-          ))}
-        </div>
-        {!d.watchlist.length && (
-          <div className="empty">
-            Save a company from Research to follow its evidence—even before
-            tracking a thesis.
+            <Link href="/discover" className="pill">
+              Investor research
+            </Link>
+            <Link href="/ask" className="pill">
+              Ask ThesisLens
+            </Link>
           </div>
+        </div>
+        {!data.watchlist.length && (
+          <p className="mt-3 flex items-center gap-2 text-sm muted">
+            <CircleAlert size={15} aria-hidden />
+            Add a watchlist company to personalize market and intelligence
+            highlights.
+          </p>
         )}
       </Section>
       <p className="source mt-8">
-        Feed assembled {d.as_of.slice(0, 10)} · Source dates govern freshness,
-        not the time this page loaded.
+        Dashboard assembled {data.as_of.slice(0, 10)} · Source dates govern
+        freshness.
       </p>
     </>
   );

@@ -19,7 +19,7 @@ const examples = [
   "Which recent news may affect my watchlist?",
   "Why did Berkshire reduce AAPL?",
   "Which investors I follow disclose GOOGL?",
-  "What changed in AAPL’s latest quarter?",
+  "What changed in UNH’s latest filing?",
   "What idea should I track for NVDA?",
 ];
 const generalErrorTitle = (code?: string | null) => {
@@ -188,8 +188,7 @@ export function AskResearch() {
                   Unknown classifications are included · classified value
                   coverage{" "}
                   {percent(
-                    m.data.sector_analysis.coverage
-                      .classified_value_percentage,
+                    m.data.sector_analysis.coverage.classified_value_percentage,
                   )}
                 </p>
               </section>

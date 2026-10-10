@@ -101,7 +101,16 @@ Request-triggered background refresh uses persistent check/error timestamps, pro
 
 | Source | Check interval | Important distinction |
 | --- | --- | --- |
-| Yahoo market snapshot | 5 minutes | Optional, delayed/unavailable; timestamp is shown |
+| Configured market snapshot | 5 minutes by default | Optional, delayed/unavailable; provider, timestamp, failures, and stale-cache state are shown |
+
+Market quotes are optional and never gate SEC filing research. Configure the
+comma-separated `MARKET_DATA_PROVIDERS` list with `yahoo` and/or `nasdaq`, or
+leave it empty for filing-only operation. `MARKET_DATA_TIMEOUT_SECONDS` bounds
+each provider request and `MARKET_CACHE_TTL_SECONDS` controls the displayed
+freshness policy. The backend records provider attempts, preserves the latest
+successful quote when a refresh fails, and never exposes credentials to the
+frontend. These are best-effort public sources with no uptime or licensing SLA;
+operators remain responsible for complying with current provider terms.
 | Official ARKK holdings | 24 hours | Fund-level daily holdings, not institutional 13F |
 | SEC Form 4 | 30 minutes | Insider transaction date and filing date; P/S codes label BUY/SELL, not recommendations |
 | Schedule 13D/G | 1 hour | Disclosed ownership percentage, filer and amendment; no inferred motives |

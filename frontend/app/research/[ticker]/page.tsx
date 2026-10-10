@@ -16,7 +16,9 @@ export default async function Research({
         <PulseResearchContext eventId={event} ticker={ticker.toUpperCase()} />
       )}
       <CompanyResearch ticker={ticker.toUpperCase()} />
-      <InstitutionalActivity ticker={ticker.toUpperCase()} />
+      <div id="institutional-ownership" className="scroll-mt-24">
+        <InstitutionalActivity ticker={ticker.toUpperCase()} />
+      </div>
     </div>
   );
 }

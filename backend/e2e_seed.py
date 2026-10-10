@@ -77,6 +77,17 @@ COMPANIES = {
         "2025-11-01",
         "2024-11-01",
     ),
+    "UNH": (
+        731766,
+        "UnitedHealth Group Incorporated",
+        "Q2",
+        "2026-06-30",
+        "2026-04-01",
+        "2025-06-30",
+        "2025-04-01",
+        "2026-01-01",
+        "2025-01-01",
+    ),
 }
 
 
@@ -156,18 +167,19 @@ def _company(store, cache, ticker, details):
             "provider_warnings": ["Synthetic E2E fixture"],
         },
     )
-    market = MarketSnapshot(
-        ticker,
-        price=100.0,
-        previous_close=98.5,
-        quote_as_of="2026-10-01T20:00:00+00:00",
-        fetched_at="2026-10-01T20:05:00+00:00",
-        provider="E2E fixture",
-        source_url=source,
-        status="delayed",
-        company_name=name,
-    )
-    store.save_snapshot("market", ticker, "current", asdict(market))
+    if ticker != "UNH":
+        market = MarketSnapshot(
+            ticker,
+            price=100.0,
+            previous_close=98.5,
+            quote_as_of="2026-10-01T20:00:00+00:00",
+            fetched_at="2026-10-01T20:05:00+00:00",
+            provider="E2E fixture",
+            source_url=source,
+            status="delayed",
+            company_name=name,
+        )
+        store.save_snapshot("market", ticker, "current", asdict(market))
     risk = {
         "text": "The company faces competitive risks that could adversely affect demand and margins.",
         "section": "Risk Factors",
@@ -175,11 +187,19 @@ def _company(store, cache, ticker, details):
         "source_url": source,
         "source_type": "Synthetic E2E filing excerpt",
     }
+    business = {
+        "text": "UnitedHealth Group is a health care and well-being company with diversified health benefits and health services businesses.",
+        "section": "Item 1. Business",
+        "period": end,
+        "source_url": source,
+        "source_type": "Synthetic E2E filing excerpt",
+        "form": "10-K",
+    }
     store.save_snapshot(
         "filing_chunks",
         ticker,
         filing["accession_number"],
-        {"filing": filing, "chunks": [risk]},
+        {"filing": filing, "chunks": [risk, business] if ticker == "UNH" else [risk]},
     )
     folder = cache / ticker
     folder.mkdir(parents=True, exist_ok=True)

@@ -432,6 +432,24 @@ export function CompanyResearch({ ticker }: { ticker: string }) {
     },
     { label: "FCF margin", value: fcfMargin, Icon: Banknote },
   ];
+  const headlineMetrics = [
+    { label: "Price", value: c.market?.price, display: money(c.market?.price) },
+    {
+      label: "Market cap",
+      value: c.market?.market_cap,
+      display: money(c.market?.market_cap),
+    },
+    {
+      label: "Trailing P/E",
+      value: c.market?.trailing_pe,
+      display: c.market?.trailing_pe?.toFixed(1),
+    },
+    {
+      label: `Revenue · ${context?.period ?? `FY${a?.fiscal_year ?? "?"}`}`,
+      value: context ? revenue?.value : a?.revenue,
+      display: money(context ? revenue?.value : a?.revenue),
+    },
+  ].filter((metric) => metric.value != null);
   return (
     <>
       <Link href="/research" className="text-sm muted">
@@ -454,6 +472,9 @@ export function CompanyResearch({ ticker }: { ticker: string }) {
             <p className="source mt-2">
               {ticker}
               {c.identity?.exchange ? ` · ${c.identity.exchange}` : ""}
+              {c.classification?.status === "verified_identifier"
+                ? ` · ${c.classification.sector}`
+                : " · Sector unclassified"}
               {" · "}
               {c.refresh.error
                 ? "Saved evidence · source refresh failed"
@@ -484,59 +505,90 @@ export function CompanyResearch({ ticker }: { ticker: string }) {
           <div className="flex flex-wrap gap-2">
             <WatchButton ticker={ticker} enabled={c.watchlisted} />
             <Button asChild>
-              <a href="#ideas-to-track">
-                View ideas <ArrowRight size={15} aria-hidden />
+              <a href="#ai-analysis">
+                AI analysis <ArrowRight size={15} aria-hidden />
               </a>
             </Button>
           </div>
         </div>
-        <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {[
-            ["Price", money(c.market?.price)],
-            ["Market cap", money(c.market?.market_cap)],
-            [
-              `Revenue · ${context?.period ?? `Latest annual · FY${a?.fiscal_year ?? "?"}`}`,
-              money(context ? revenue?.value : a?.revenue),
-            ],
-            [
-              "Trailing P/E",
-              c.market?.trailing_pe?.toFixed(1) ?? "Unavailable",
-            ],
-          ].map(([label, value]) => (
-            <div
-              className="rounded-xl border border-border/70 bg-background/30 p-4"
-              key={label}
-            >
-              <p className="source !mt-0">{label}</p>
-              <p className="metric mt-2">{value}</p>
-            </div>
-          ))}
-        </div>
-        <p className="source mt-5 inline-flex items-center gap-1.5">
-          <CalendarDays size={13} aria-hidden />
-          {c.market?.status ?? "unavailable"} · Quote updated{" "}
-          {c.market?.quote_as_of || c.market_as_of || "date unavailable"}
-          {c.market?.provider && ` · ${c.market.provider}`}
-        </p>
-        <p className="source">
-          Previous close: {money(c.market?.previous_close)}
-          {c.market?.status === "cached" &&
-            " · Showing the last successful saved quote; the current source check has not supplied a fresh value."}
-          {c.market?.source_url && (
-            <>
-              {" "}
-              ·{" "}
-              <a
-                href={c.market.source_url}
-                target="_blank"
-                rel="noopener noreferrer"
+        {headlineMetrics.length > 0 && (
+          <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {headlineMetrics.map(({ label, display }) => (
+              <div
+                className="rounded-xl border border-border/70 bg-background/30 p-4"
+                key={label}
               >
-                Quote source ↗
-              </a>
-            </>
+                <p className="source !mt-0">{label}</p>
+                <p className="metric mt-2">{display}</p>
+              </div>
+            ))}
+          </div>
+        )}
+        {c.market?.price != null && (
+          <p className="source mt-5 inline-flex items-center gap-1.5">
+            <CalendarDays size={13} aria-hidden />
+            {c.market?.status ?? "unavailable"} · Quote updated{" "}
+            {c.market?.quote_as_of || c.market_as_of || "date unavailable"}
+            {c.market?.provider && ` · ${c.market.provider}`}
+          </p>
+        )}
+        {c.market?.price != null && (
+          <p className="source">
+            Previous close: {money(c.market?.previous_close)}
+            {c.market?.status === "cached" &&
+              " · Showing the last successful saved quote; the current source check has not supplied a fresh value."}
+            {c.market?.source_url && (
+              <>
+                {" "}
+                ·{" "}
+                <a
+                  href={c.market.source_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Quote source ↗
+                </a>
+              </>
+            )}
+          </p>
+        )}
+        {c.market?.availability &&
+          (!c.market.availability.available || c.market.stale) && (
+            <details className="mt-5 rounded-xl border border-border/70 bg-background/30 p-4">
+              <summary className="font-medium">
+                Market data availability
+              </summary>
+              <p className="muted mt-3 text-sm">
+                {c.market.availability.message}
+              </p>
+              <p className="source">
+                Checked{" "}
+                {c.market.availability.checked_at?.slice(0, 10) ?? "not yet"} ·
+                Cache TTL {Math.round(c.market.availability.ttl_seconds / 60)}{" "}
+                minutes
+                {c.market.availability.configured_providers.length
+                  ? ` · Providers: ${c.market.availability.configured_providers.join(", ")}`
+                  : ""}
+              </p>
+            </details>
           )}
-        </p>
       </section>
+      <nav
+        aria-label="Company research sections"
+        className="mt-5 flex gap-2 overflow-x-auto rounded-xl border border-border/70 bg-card/60 p-2"
+      >
+        {[
+          ["Overview", "overview"],
+          ["Financials", "financials"],
+          ["Institutional ownership", "institutional-ownership"],
+          ["Filings", "filings"],
+          ["AI analysis", "ai-analysis"],
+        ].map(([label, id]) => (
+          <a key={id} href={`#${id}`} className="pill whitespace-nowrap">
+            {label}
+          </a>
+        ))}
+      </nav>
       {!c.available && (
         <div className="empty mt-6">
           <FileSearch
@@ -569,17 +621,17 @@ export function CompanyResearch({ ticker }: { ticker: string }) {
           <p className="source">{c.refresh.error}</p>
         </div>
       )}
-      <Section title="Business & filing evidence">
-        <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
+      <Section id="overview" title="Business Overview">
+        <div>
           <article className="panel">
-            <h3>Business overview</h3>
+            <h3>What the company says it does</h3>
             {c.overview ? (
               <>
                 <p className="muted mt-3 text-sm leading-6">
                   {c.overview.text}
                 </p>
                 <p className="source mt-3">
-                  SEC filing excerpt ·{" "}
+                  SEC {c.overview.section ?? "Item 1"} excerpt ·{" "}
                   {c.overview.period || "Period not listed"} ·{" "}
                   <a
                     href={c.overview.source_url}
@@ -591,17 +643,33 @@ export function CompanyResearch({ ticker }: { ticker: string }) {
                 </p>
               </>
             ) : (
-              <p className="muted mt-3 text-sm">
-                A sourced business overview is not cached. Open the original
-                filing rather than relying on an unsourced summary.
-              </p>
+              <>
+                <p className="muted mt-3 text-sm">
+                  {c.overview_fallback?.message ??
+                    "A sourced Item 1 business overview is not cached. No unsourced summary is substituted."}
+                </p>
+                {c.overview_fallback?.source_url && (
+                  <a
+                    className="source"
+                    href={c.overview_fallback.source_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Open latest annual filing ↗
+                  </a>
+                )}
+              </>
             )}
           </article>
-          <article className="panel">
-            <h3>Recent SEC filings</h3>
-            {c.filing_timeline.length ? (
+        </div>
+      </Section>
+      <Section id="filings" title="SEC Filings">
+        <article className="panel">
+          <h3>Latest important filing</h3>
+          {c.filing_timeline.length ? (
+            <>
               <ul className="mt-3 space-y-3">
-                {c.filing_timeline.slice(0, 4).map((filing) => (
+                {c.filing_timeline.slice(0, 1).map((filing) => (
                   <li
                     key={filing.source_url}
                     className="border-b border-border/60 pb-3 last:border-0"
@@ -621,15 +689,43 @@ export function CompanyResearch({ ticker }: { ticker: string }) {
                   </li>
                 ))}
               </ul>
-            ) : (
-              <p className="muted mt-3 text-sm">
-                No verified filing timeline is cached yet.
-              </p>
-            )}
-          </article>
-        </div>
+              {c.filing_timeline.length > 1 && (
+                <details className="mt-4">
+                  <summary>
+                    View filing history ({c.filing_timeline.length - 1})
+                  </summary>
+                  <ul className="mt-3 space-y-3">
+                    {c.filing_timeline.slice(1).map((filing) => (
+                      <li
+                        key={filing.source_url}
+                        className="border-b border-border/60 pb-3 last:border-0"
+                      >
+                        <a
+                          className="font-medium text-primary"
+                          href={filing.source_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {filing.form} ↗
+                        </a>
+                        <p className="source !mt-1">
+                          Period {filing.report_date || "unavailable"} · Filed{" "}
+                          {filing.filing_date}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </>
+          ) : (
+            <p className="muted mt-3 text-sm">
+              No verified filing timeline is cached yet.
+            </p>
+          )}
+        </article>
       </Section>
-      <Section title="Why It Matters">
+      <Section id="financials" title="Why It Matters">
         <div className="grid-cards">
           <article className="panel">
             <span className="icon-shell">
@@ -910,7 +1006,7 @@ export function CompanyResearch({ ticker }: { ticker: string }) {
           )}
         </div>
       </Section>
-      <section id="ideas-to-track" className="scroll-mt-24">
+      <section id="ai-analysis" className="scroll-mt-24">
         <div className="section-head">
           <h2>What To Watch</h2>
         </div>
@@ -930,7 +1026,7 @@ export function CompanyResearch({ ticker }: { ticker: string }) {
                 " Annual financial ideas retain their original fiscal-year labels; they are background context, not latest-quarter metrics."}
             </p>
             <div className="space-y-4">
-              {c.suggestions.map((suggestion) => (
+              {c.suggestions.slice(0, 3).map((suggestion) => (
                 <SuggestedCard
                   key={suggestion.id}
                   suggestion={suggestion}
@@ -939,6 +1035,23 @@ export function CompanyResearch({ ticker }: { ticker: string }) {
                 />
               ))}
             </div>
+            {c.suggestions.length > 3 && (
+              <details className="panel mt-4">
+                <summary className="font-semibold">
+                  More evidence-backed ideas ({c.suggestions.length - 3})
+                </summary>
+                <div className="mt-4 space-y-4">
+                  {c.suggestions.slice(3).map((suggestion) => (
+                    <SuggestedCard
+                      key={suggestion.id}
+                      suggestion={suggestion}
+                      ticker={ticker}
+                      tracked={c.theses}
+                    />
+                  ))}
+                </div>
+              </details>
+            )}
             {!c.suggestions.length && (
               <div className="empty">
                 <h3>No sourced ideas yet</h3>

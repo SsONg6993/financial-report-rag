@@ -41,10 +41,16 @@ SECURITY_SECTORS: dict[str, SectorClassification] = {
     "084670702": SectorClassification("Financials", "6331", "BRK.B", 1067983),
     "191216100": SectorClassification("Consumer Staples", "2086", "KO", 21344),
     "30303M102": SectorClassification("Communication Services", "7370", "META", 1326801),
+    "46625H100": SectorClassification("Financials", "6021", "JPM", 19617),
+    "478160104": SectorClassification("Health Care", "2834", "JNJ", 200406),
     "594918104": SectorClassification("Information Technology", "7372", "MSFT", 789019),
     "67066G104": SectorClassification("Information Technology", "3674", "NVDA", 1045810),
     "674599105": SectorClassification("Energy", "1311", "OXY", 797468),
+    "30231G102": SectorClassification("Energy", "2911", "XOM", 34088),
+    "166764100": SectorClassification("Energy", "2911", "CVX", 93410),
     "88160R101": SectorClassification("Consumer Discretionary", "3711", "TSLA", 1318605),
+    "91324P102": SectorClassification("Health Care", "6324", "UNH", 731766),
+    "931142103": SectorClassification("Consumer Staples", "5331", "WMT", 104169),
 }
 
 
@@ -78,6 +84,28 @@ def classify_holding(holding: Holding) -> dict:
         "taxonomy": TAXONOMY_NAME,
         "taxonomy_code": f"SEC SIC {classification.sic}",
         "classification_source_url": classification.source_url,
+    }
+
+
+def classify_ticker(ticker: str) -> dict:
+    """Return an identity-backed company classification, never a name guess."""
+    normalized = ticker.upper().replace("-", ".")
+    matches = [item for item in SECURITY_SECTORS.values() if item.ticker == normalized]
+    if len(matches) != 1:
+        return {
+            "sector": UNKNOWN_SECTOR,
+            "taxonomy": TAXONOMY_NAME,
+            "taxonomy_code": None,
+            "source_url": None,
+            "status": "unknown",
+        }
+    item = matches[0]
+    return {
+        "sector": item.sector,
+        "taxonomy": TAXONOMY_NAME,
+        "taxonomy_code": f"SEC SIC {item.sic}",
+        "source_url": item.source_url,
+        "status": "verified_identifier",
     }
 
 def _allocation(snapshot: PortfolioSnapshot) -> tuple[list[dict], dict]:

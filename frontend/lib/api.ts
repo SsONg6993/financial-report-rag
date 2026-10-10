@@ -360,8 +360,22 @@ export const companySchema = z.object({
       text: z.string(),
       source_url: z.string(),
       period: z.string(),
+      section: z.string().optional(),
     })
     .nullable()
+    .optional(),
+  overview_fallback: z
+    .object({ message: z.string(), source_url: z.string() })
+    .nullable()
+    .optional(),
+  classification: z
+    .object({
+      sector: z.string(),
+      taxonomy: z.string(),
+      taxonomy_code: z.string().nullable(),
+      source_url: z.string().nullable(),
+      status: z.string(),
+    })
     .optional(),
   filing_timeline: z
     .array(
@@ -386,6 +400,23 @@ export const companySchema = z.object({
       source_url: z.string().optional(),
       status: z.enum(["live", "delayed", "cached", "unavailable"]).optional(),
       stale: z.boolean().optional(),
+      availability: z
+        .object({
+          available: z.boolean(),
+          reason: z.string().nullable(),
+          message: z.string(),
+          configured_providers: z.array(z.string()),
+          attempts: z.array(
+            z.object({
+              provider: z.string(),
+              status: z.string(),
+              reason: z.string().nullable().optional(),
+            }),
+          ),
+          checked_at: z.string().nullable().optional(),
+          ttl_seconds: z.number(),
+        })
+        .optional(),
     })
     .optional(),
   market_as_of: z.string().optional(),
@@ -503,6 +534,23 @@ export const companyResolveSchema = z.object({
   error: z.string().nullable().optional(),
 });
 export const homeSchema = z.object({
+  market_overview: z
+    .array(
+      z.object({
+        ticker: z.string(),
+        price: z.number().nullable(),
+        previous_close: z.number().nullable(),
+        change: z.number().nullable(),
+        currency: z.string(),
+        quote_as_of: z.string().nullable(),
+        provider: z.string().nullable(),
+        source_url: z.string().nullable(),
+        status: z.string(),
+        available: z.boolean(),
+        missing_reason: z.string().nullable(),
+      }),
+    )
+    .default([]),
   activity: z.array(
     changeSchema.extend({
       institution: z.string(),
