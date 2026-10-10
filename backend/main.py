@@ -1,5 +1,6 @@
 """Run: python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000."""
 
+import logging
 from typing import Annotated, Literal
 
 from dotenv import load_dotenv
@@ -7,6 +8,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 load_dotenv()
+from backend.logging_config import configure_logging
 from backend.models import (
     Answer,
     Company,
@@ -21,6 +23,9 @@ from backend.service import ResearchService
 from src.company_directory import CompanyDirectory
 from src.sec import normalize_ticker
 from src.thesis import RULE_METRICS
+
+configure_logging()
+logger = logging.getLogger("thesislens.api")
 
 app = FastAPI(
     title="ThesisLens",
@@ -87,9 +92,29 @@ def valid_investor(key):
     return key
 
 
+@app.middleware("http")
+async def log_unexpected_errors(request, call_next):
+    try:
+        return await call_next(request)
+    except Exception:
+        logger.exception(
+            "Unhandled API error method=%s path=%s", request.method, request.url.path
+        )
+        raise
+
+
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    from backend.runtime_status import liveness
+
+    return liveness()
+
+
+@app.get("/api/readiness")
+def runtime_readiness():
+    from backend.runtime_status import readiness
+
+    return readiness(service)
 
 
 @app.get("/api/home/feed", response_model=Feed)

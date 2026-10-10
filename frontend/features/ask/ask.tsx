@@ -26,6 +26,7 @@ const generalErrorTitle = (code?: string | null) => {
     return "Ollama service is not running";
   if (code === "ollama_model_missing") return "Ollama model is missing";
   if (code === "ollama_timeout") return "Ollama response timed out";
+  if (code === "ollama_loading") return "Ollama model is loading";
   if (code === "remote_llm_disabled") return "Remote LLM access is disabled";
   return "General AI configuration error";
 };

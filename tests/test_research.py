@@ -204,6 +204,46 @@ def test_general_llm_reports_missing_local_model(monkeypatch):
     assert result.error_code == "ollama_model_missing"
 
 
+def test_general_llm_reports_model_loading_without_restarting(monkeypatch):
+    response = requests.Response()
+    response.status_code = 503
+
+    def loading(*_args, **_kwargs):
+        raise requests.HTTPError(response=response)
+
+    monkeypatch.setattr("src.llm.requests.get", loading)
+    result = generate_general_answer(
+        "Explain medical AI", "qwen3:4b", readiness_retries=0
+    )
+    assert not result.available
+    assert result.error_code == "ollama_loading"
+
+
+def test_general_llm_inference_timeout_is_not_retried_or_restarted(monkeypatch):
+    class Tags:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"models": [{"name": "qwen3:4b"}]}
+
+    calls = 0
+
+    def timeout(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise requests.Timeout("synthetic inference timeout")
+
+    monkeypatch.setattr("src.llm.requests.get", lambda *_args, **_kwargs: Tags())
+    monkeypatch.setattr("src.llm.requests.post", timeout)
+    result = generate_general_answer(
+        "Explain medical AI", "qwen3:4b", inference_timeout=5
+    )
+    assert not result.available
+    assert result.error_code == "ollama_timeout"
+    assert calls == 1
+
+
 def test_general_llm_uses_only_question_with_installed_model(monkeypatch):
     class Response:
         def raise_for_status(self):

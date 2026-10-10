@@ -729,6 +729,9 @@ class ResearchService:
                 self.config.ollama_model,
                 self.config.ollama_base_url,
                 self.config.allow_remote_llm,
+                self.config.ollama_readiness_timeout,
+                self.config.ollama_inference_timeout,
+                self.config.ollama_readiness_retries,
             )
             if not result.available:
                 return {

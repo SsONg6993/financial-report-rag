@@ -451,6 +451,7 @@ export const answerSchema = z.object({
       "ollama_service_not_running",
       "ollama_model_missing",
       "ollama_timeout",
+      "ollama_loading",
       "ollama_invalid_response",
     ])
     .nullable()

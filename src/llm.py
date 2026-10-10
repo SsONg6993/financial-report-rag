@@ -1,5 +1,6 @@
 """Grounded Ollama generation with a clean retrieval-only fallback."""
 
+import time
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -54,6 +55,9 @@ def generate_general_answer(
     model: str,
     base_url: str = "http://localhost:11434",
     allow_remote: bool = False,
+    readiness_timeout: float = 5.0,
+    inference_timeout: float = 120.0,
+    readiness_retries: int = 1,
 ) -> GenerationResult:
     """Use configured Ollama only; remote endpoints require explicit opt-in."""
     parsed = urlparse(base_url)
@@ -67,31 +71,63 @@ def generate_general_answer(
             "remote_llm_disabled",
         )
     endpoint = base_url.rstrip("/")
+    tags = None
+    for attempt in range(max(0, min(readiness_retries, 3)) + 1):
+        try:
+            tags = requests.get(
+                f"{endpoint}/api/tags", timeout=(2, max(1.0, readiness_timeout))
+            )
+            tags.raise_for_status()
+            break
+        except requests.ConnectionError:
+            if attempt >= readiness_retries:
+                return GenerationResult(
+                    None,
+                    False,
+                    f"Ollama service is not running at {base_url}. Start it with `ollama serve`.",
+                    "ollama_service_not_running",
+                )
+            time.sleep(0.2 * (attempt + 1))
+        except requests.Timeout:
+            return GenerationResult(
+                None,
+                False,
+                f"Ollama readiness check timed out at {base_url}; the service may still be loading.",
+                "ollama_loading",
+            )
+        except requests.HTTPError as exc:
+            if exc.response is not None and exc.response.status_code in {429, 503}:
+                return GenerationResult(
+                    None,
+                    False,
+                    f"Ollama model '{model}' is still loading. Retry shortly.",
+                    "ollama_loading",
+                )
+            return GenerationResult(
+                None,
+                False,
+                f"Ollama service at {base_url} returned an invalid status response.",
+                "ollama_invalid_response",
+            )
+        except (requests.RequestException, KeyError, TypeError, ValueError):
+            return GenerationResult(
+                None,
+                False,
+                f"Ollama service at {base_url} returned an invalid status response.",
+                "ollama_invalid_response",
+            )
     try:
-        tags = requests.get(f"{endpoint}/api/tags", timeout=(2, 5))
-        tags.raise_for_status()
-        models = tags.json().get("models", [])
+        models = tags.json().get("models", []) if tags is not None else []
         installed = {
             name
             for item in models
             for name in (item.get("name"), item.get("model"))
             if isinstance(name, str)
         }
-    except requests.ConnectionError:
-        return GenerationResult(
-            None,
-            False,
-            f"Ollama service is not running at {base_url}. Start it with `ollama serve`.",
-            "ollama_service_not_running",
-        )
     except requests.Timeout:
-        return GenerationResult(
-            None,
-            False,
-            f"Ollama service did not respond at {base_url}.",
-            "ollama_timeout",
-        )
-    except (requests.RequestException, KeyError, TypeError, ValueError):
+        # Kept for defensive compatibility with unusual response wrappers.
+        return GenerationResult(None, False, "Ollama status timed out.", "ollama_loading")
+    except (KeyError, TypeError, ValueError):
         return GenerationResult(
             None,
             False,
@@ -112,13 +148,23 @@ def generate_general_answer(
         "Do not claim access to accounts, files, or live information.\n\n"
         f"User question: {question}\n\nAnswer:"
     )
+    response = None
     try:
-        response = requests.post(
-            f"{endpoint}/api/generate",
-            json={"model": model, "prompt": prompt, "stream": False},
-            timeout=(2, 120),
-        )
-        response.raise_for_status()
+        for attempt in range(2):
+            try:
+                response = requests.post(
+                    f"{endpoint}/api/generate",
+                    json={"model": model, "prompt": prompt, "stream": False},
+                    timeout=(2, max(5.0, inference_timeout)),
+                )
+                response.raise_for_status()
+                break
+            except requests.ConnectionError:
+                if attempt:
+                    raise
+                time.sleep(0.2)
+        if response is None:
+            raise requests.ConnectionError("No Ollama response")
         answer = response.json().get("response", "").strip()
         if not answer:
             return GenerationResult(None, False, "The configured LLM returned no text.")
@@ -136,6 +182,20 @@ def generate_general_answer(
             False,
             f"Ollama model '{model}' timed out before producing a response.",
             "ollama_timeout",
+        )
+    except requests.HTTPError as exc:
+        if exc.response is not None and exc.response.status_code in {429, 503}:
+            return GenerationResult(
+                None,
+                False,
+                f"Ollama model '{model}' is still loading. Retry shortly.",
+                "ollama_loading",
+            )
+        return GenerationResult(
+            None,
+            False,
+            f"Ollama model '{model}' returned an invalid response.",
+            "ollama_invalid_response",
         )
     except (requests.RequestException, KeyError, TypeError, ValueError):
         return GenerationResult(

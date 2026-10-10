@@ -4,7 +4,7 @@ Follow great investors. Understand what they own. Verify the thesis yourself.
 
 ## Primary application: Next.js + FastAPI
 
-The consumer app is now `frontend/`, with only **Home, Discover, Research, Ask** in its primary navigation. Streamlit is retained only as an internal/debug workspace. Public holdings are research inputs, not recommendations; position changes do not establish motive.
+The consumer app is now `frontend/`, with **Home, Discover, Research, Market Pulse, Ask, and Status** in its primary navigation. Streamlit is retained only as an internal/debug workspace. Public holdings are research inputs, not recommendations; position changes do not establish motive.
 
 ```text
 Next.js 16 / React 19 / TypeScript / Tailwind 4 / shadcn / TanStack Query / Zod
@@ -13,6 +13,24 @@ FastAPI / Pydantic → existing src/ financial and retrieval services
                               ↓
 SEC EDGAR + XBRL / local SQLite / Qdrant + BM25S / optional Jev + Ollama
 ```
+
+### One-command Windows startup
+
+After installing the Python and frontend dependencies once, start the complete local app from the repository root:
+
+```powershell
+.\start-thesislens.ps1
+```
+
+The manager verifies the project `.venv`, detects port conflicts, reuses only a matching healthy Backend, starts installed local Ollama when needed, checks the configured model without downloading it, starts one Frontend, waits for readiness, and opens `http://127.0.0.1:3000`. Use `-NoBrowser` for terminal-only startup. It records only process IDs, start times, a random instance identifier, and build metadata under ignored `.runtime/`; rotating logs are capped there as well.
+
+```powershell
+.\status-thesislens.ps1       # safe dependency summary; never prints secrets
+.\status-thesislens.ps1 -Json # machine-readable summary
+.\stop-thesislens.ps1         # stops only verified manager-owned process trees
+```
+
+An unrelated or unverifiable listener on port 8000 or 3000 is never terminated. Close it yourself after confirming ownership, then rerun startup. The manager does not install services, create startup tasks, change Windows settings, download models, use force-kill, or expose the local API to the network. The Status page provides the same Backend, Market Pulse, General AI, and Frontend diagnostics with a manual refresh control.
 
 ### Run the backend (PowerShell terminal 1)
 
@@ -58,6 +76,7 @@ Company search uses the free [SEC ticker/CIK/exchange directory](https://www.sec
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
+| GET | `/api/health`, `/api/readiness` | Lightweight liveness and version-aware local dependency readiness |
 | GET | `/api/home/feed`, `/api/investors` | Discovery, activity, ideas, watchlist |
 | GET | `/api/investors/{id}`, `/holdings`, `/changes` | Profile, reported positions, deterministic share changes |
 | PUT | `/api/investors/{id}/follow` | Persist followed institution |
@@ -114,7 +133,7 @@ Ask protects investor motives: “Why did Berkshire reduce AAPL?” returns no s
 
 See `docs/consumer-verification.md` for actual measured test results, source observations and limitations. Browser tests use a copy of the real local database; they must not target personal saved research. Synthetic fixtures exist only in Python unit tests.
 
-Screenshot locations after browser QA: `frontend/test-results/home-desktop.png`, `discover-desktop.png`, `investor-desktop.png`, `research-desktop.png`, `nvda-desktop.png`, `ask-desktop.png`, plus mobile variants. These are generated artifacts, not mocked screens. Documentation screenshot slots: Home / Discover / Research / investor profile (capture with the E2E suite).
+Screenshot locations after browser QA: `frontend/test-results/home-desktop.png`, `discover-desktop.png`, `investor-desktop.png`, `research-desktop.png`, `nvda-desktop.png`, `ask-desktop.png`, and `runtime-dashboard-desktop.png`, plus mobile variants. These are generated artifacts, not mocked screens. Documentation screenshot slots: Home / Discover / Research / investor profile / Runtime Status (capture with the E2E suite).
 
 ```powershell
 # Python tests, from repository root

@@ -215,3 +215,47 @@ test("Ask quarterly numbers and annual context stay separate", async ({
     ).not.toContainText("FY2025");
   }
 });
+
+test("runtime dashboard explains dependency state", async ({ page }) => {
+  await page.route("**/api/readiness", (route) =>
+    route.fulfill({
+      json: {
+        status: "ready",
+        service: "ThesisLens Backend",
+        api_version: "0.1.0",
+        build_commit: "abc123",
+        checked_at: "2026-10-10T00:00:00Z",
+        backend: { status: "ready" },
+        database: { status: "ready", accessible: true },
+        cache: { status: "ready", accessible: true },
+        market_pulse: {
+          status: "stale_cache",
+          detail: "Using retained cache.",
+        },
+        ollama: {
+          status: "model_missing",
+          model: "qwen3:4b",
+          model_available: false,
+          detail: "Download requires approval.",
+        },
+      },
+    }),
+  );
+  await page.goto("/status");
+  await expect(
+    page.getByRole("heading", { name: "System status" }),
+  ).toBeVisible();
+  await expect(page.getByTestId("runtime-market-pulse")).toContainText(
+    "Stale cache",
+  );
+  await expect(page.getByTestId("runtime-general-ai")).toContainText(
+    "Model missing",
+  );
+  await expect(
+    page.getByRole("button", { name: "Refresh status" }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: `test-results/runtime-dashboard-${test.info().project.name}.png`,
+    fullPage: true,
+  });
+});
