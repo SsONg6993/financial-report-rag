@@ -77,7 +77,7 @@ test("rendered disclosure context and viewport layout", async ({ page }) => {
 test("real Home and Discover have dated disclosure data", async ({ page }) => {
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Top Investor Activity" }),
+    page.getByRole("heading", { name: "Institutional Activity" }),
   ).toBeVisible();
   await expect(page.getByText("SEC Form 13F").first()).toBeVisible();
   await page.screenshot({
@@ -251,9 +251,7 @@ test("watchlist works without a thesis and Ask does not invent rationale", async
   await expect(
     page.getByRole("heading", { name: "My Watchlist" }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "NVDA", exact: true }).last(),
-  ).toBeVisible();
+  await expect(page.getByRole("row", { name: /NVDA/ })).toBeVisible();
   await page.goto("/ask");
   await page
     .getByLabel("What would you like to investigate?")

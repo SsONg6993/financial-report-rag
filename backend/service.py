@@ -14,7 +14,12 @@ from backend.entity_registry import TrackedEntityRegistry
 from backend.intelligence import IntelligenceService
 from backend.period_facts import financial_context, quarterly_comparisons
 from backend.quarterly import quarter_facts, quarterly_changes
-from backend.research_context import comparisons, risk_cards, structured_answer
+from backend.research_context import (
+    business_overview,
+    comparisons,
+    risk_cards,
+    structured_answer,
+)
 from backend.suggestions import CATEGORIES, suggested_theses
 from backend.tickers import enrich_cached_classes
 from src.ask import answer_question
@@ -35,7 +40,7 @@ from src.portfolios import (
     fetch_ark_holdings,
 )
 from src.sec import normalize_ticker
-from src.sector_intelligence import analyze_sector_exposure
+from src.sector_intelligence import analyze_sector_exposure, classify_ticker
 from src.thesis import evaluate_thesis
 from src.thesis_research import (
     company_changes,
@@ -174,7 +179,10 @@ class ResearchService:
                     },
                 )
             elif kind == "market":
-                market = asdict(ResilientMarketProvider().snapshot(key))
+                market = asdict(
+                    ResilientMarketProvider.from_config(self.config).snapshot(key)
+                )
+                self.store.save_snapshot("market_status", key, "current", market)
                 if market.get("error") or not market.get("price"):
                     raise RuntimeError(market.get("error") or "No valid quote returned")
                 self.store.save_snapshot("market", key, "current", market)
@@ -626,6 +634,8 @@ class ResearchService:
             saved_market[0] if saved_market else (data or {}).get("market", {})
         )
         market_state = self.cache_state("market", ticker)
+        market_checks = self.store.snapshots("market_status", ticker)
+        market_check = market_checks[0] if market_checks else {}
         quote_time = market.get("quote_as_of") or (data or {}).get("market_as_of")
         if market.get("price") is not None:
             market["status"] = (
@@ -639,6 +649,33 @@ class ResearchService:
             market["status"] = "unavailable"
         market["quote_as_of"] = quote_time
         market["stale"] = market["status"] == "cached"
+        configured = list(self.config.market_data_providers)
+        if market.get("price") is not None:
+            market_reason = "stale_cache" if market["stale"] else None
+            market_message = (
+                "The latest successful quote is being shown because the most recent provider check failed."
+                if market["stale"]
+                else "Dated market data is available from the identified provider."
+            )
+        elif not configured:
+            market_reason = "not_configured"
+            market_message = "No market-data provider is configured. Filing research remains available."
+        elif market_check.get("error_code") == "provider_unavailable" or market_state.get("error"):
+            market_reason = "provider_unavailable"
+            market_message = "Configured market-data providers did not return a valid quote."
+        else:
+            market_reason = "not_cached"
+            market_message = "No successful market quote has been cached yet."
+        market["availability"] = {
+            "available": market.get("price") is not None,
+            "reason": market_reason,
+            "message": market_message,
+            "configured_providers": configured,
+            "attempts": market_check.get("attempts", []),
+            "checked_at": market_state.get("checked_at"),
+            "ttl_seconds": self.config.market_cache_ttl_seconds,
+        }
+        classification = classify_ticker(ticker)
         radar = []
         for institution in self.investors():
             holdings = [
@@ -677,6 +714,7 @@ class ResearchService:
                 "availability_status": availability,
                 "market": market,
                 "market_as_of": quote_time or "",
+                "classification": classification,
                 "metric_context": [],
                 "risk_cards": [],
                 "warnings": [
@@ -708,17 +746,7 @@ class ResearchService:
             facts_payload, data.get("filings", []), annual
         )
         chunks = self.chunks(ticker)
-        overview_chunk = next(
-            (
-                chunk
-                for chunk in chunks
-                if "business"
-                in str(chunk.get("section_title", chunk.get("section", ""))).lower()
-                and chunk.get("source_url")
-                and chunk.get("text")
-            ),
-            None,
-        )
+        overview = business_overview(chunks)
         suggestions = suggested_theses(data, chunks)
         ignored = self.store.snapshots("ignored_suggestions", ticker)
         ignored_ids = ignored[0].get("ids", []) if ignored else []
@@ -801,13 +829,18 @@ class ResearchService:
                 if not financials
                 else "ready"
             ),
-            "overview": {
-                "text": overview_chunk["text"][:450],
-                "source_url": overview_chunk["source_url"],
-                "period": overview_chunk.get("period", ""),
-            }
-            if overview_chunk
-            else None,
+            "overview": overview,
+            "overview_fallback": next(
+                (
+                    {
+                        "message": "A parsed Item 1 business overview is not available. Read the original annual filing for authoritative business context.",
+                        "source_url": filing["source_url"],
+                    }
+                    for filing in data.get("filings", [])
+                    if filing.get("form") == "10-K" and filing.get("source_url")
+                ),
+                None,
+            ),
             "filing_timeline": [
                 {
                     "form": filing["form"],
@@ -824,6 +857,7 @@ class ResearchService:
             ),
             "market": market,
             "market_as_of": quote_time or "",
+            "classification": classification,
             "annual": annual,
             "metric_context": comparisons(financials)
             if period_context["kind"] == "annual"
@@ -928,6 +962,7 @@ class ResearchService:
                 }
             )
         watchlist = []
+        market_overview = []
         for ticker in self.store.watchlist():
             theses = self.store.theses(ticker)
             watchlist.append(
@@ -938,6 +973,32 @@ class ResearchService:
                         t["status"] in {"WEAKENED", "UNCERTAIN"} for t in theses
                     ),
                     "available": bool(self.cached_company(ticker)),
+                }
+            )
+            saved = self.store.snapshots("market", ticker)
+            quote = saved[0] if saved else {}
+            price = quote.get("price")
+            previous = quote.get("previous_close")
+            change = (
+                (price - previous) / previous
+                if isinstance(price, (int, float))
+                and isinstance(previous, (int, float))
+                and previous > 0
+                else None
+            )
+            market_overview.append(
+                {
+                    "ticker": ticker,
+                    "price": price,
+                    "previous_close": previous,
+                    "change": change,
+                    "currency": quote.get("currency", "USD"),
+                    "quote_as_of": quote.get("quote_as_of"),
+                    "provider": quote.get("provider"),
+                    "source_url": quote.get("source_url"),
+                    "status": quote.get("status", "unavailable") if price else "unavailable",
+                    "available": price is not None,
+                    "missing_reason": None if price is not None else "No successful saved quote",
                 }
             )
         disclosures = []
@@ -956,6 +1017,7 @@ class ResearchService:
             "activity": activity[:12],
             "ideas": ideas,
             "watchlist": watchlist,
+            "market_overview": market_overview,
             "investors": investors,
             "recent_disclosures": disclosures[:8],
             "freshness_policy": REFRESH_SECONDS,

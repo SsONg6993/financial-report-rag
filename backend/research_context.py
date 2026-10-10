@@ -7,6 +7,41 @@ import re
 import requests
 
 
+def business_overview(chunks: list[dict], limit: int = 640) -> dict | None:
+    """Select a concise Item 1 business excerpt from verified filing chunks."""
+    candidates = []
+    for chunk in chunks:
+        text = re.sub(r"\s+", " ", str(chunk.get("text", ""))).strip()
+        section = str(
+            chunk.get("section_title") or chunk.get("section") or ""
+        ).strip().lower()
+        if not text or not chunk.get("source_url"):
+            continue
+        if "risk" in section or re.search(r"item\s*1\s*a\b", section):
+            continue
+        score = 0
+        if re.search(r"\bitem\s*1\b", section):
+            score += 4
+        if "business" in section:
+            score += 3
+        if str(chunk.get("form", "")).upper() == "10-K":
+            score += 2
+        if score:
+            candidates.append((score, len(text), chunk, text))
+    if not candidates:
+        return None
+    _score, _length, chunk, text = max(candidates, key=lambda row: (row[0], row[1]))
+    excerpt = text[:limit].rsplit(" ", 1)[0] if len(text) > limit else text
+    if len(text) > limit:
+        excerpt = excerpt.rstrip(" ,;:") + "…"
+    return {
+        "text": excerpt,
+        "source_url": chunk["source_url"],
+        "period": chunk.get("period", chunk.get("filing_date", "")),
+        "section": chunk.get("section_title") or chunk.get("section") or "Item 1",
+    }
+
+
 def synthesis(payload, config):
     """Bounded local synthesis; unavailable/invalid models leave the fallback intact."""
     if os.getenv("THESISLENS_OFFLINE", "false").lower() == "true":

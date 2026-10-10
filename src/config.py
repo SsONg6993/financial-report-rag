@@ -30,6 +30,9 @@ class AppConfig:
     jev_confidence_threshold: float
     chunk_size: int
     chunk_overlap: int
+    market_data_providers: tuple[str, ...] = ("yahoo", "nasdaq")
+    market_data_timeout: float = 12.0
+    market_cache_ttl_seconds: int = 300
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -59,4 +62,15 @@ class AppConfig:
             ),
             chunk_size=int(os.getenv("CHUNK_SIZE", "1600")),
             chunk_overlap=int(os.getenv("CHUNK_OVERLAP", "200")),
+            market_data_providers=tuple(
+                item.strip().lower()
+                for item in os.getenv("MARKET_DATA_PROVIDERS", "yahoo,nasdaq").split(",")
+                if item.strip()
+            ),
+            market_data_timeout=max(
+                1.0, min(float(os.getenv("MARKET_DATA_TIMEOUT_SECONDS", "12")), 30.0)
+            ),
+            market_cache_ttl_seconds=max(
+                60, int(os.getenv("MARKET_CACHE_TTL_SECONDS", "300"))
+            ),
         )

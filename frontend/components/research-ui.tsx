@@ -262,16 +262,18 @@ export function SearchBox() {
   );
 }
 export function Section({
+  id,
   title,
   aside,
   children,
 }: {
+  id?: string;
   title: string;
   aside?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
-    <section>
+    <section id={id} className="scroll-mt-24">
       <div className="section-head">
         <h2>{title}</h2>
         {aside}
