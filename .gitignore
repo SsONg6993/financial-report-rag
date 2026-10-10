@@ -21,6 +21,7 @@ data/local/
 
 .pytest-temp/
 .e2e-runtime/
+.runtime/
 *.db
 *.sqlite
 *.sqlite3

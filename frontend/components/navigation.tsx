@@ -46,6 +46,7 @@ export function Navigation() {
             ["Research", "/research"],
             ["Market Pulse", "/market-pulse"],
             ["Ask", "/ask"],
+            ["Status", "/status"],
           ].map(([x, href]) => (
             <Link
               key={x}
