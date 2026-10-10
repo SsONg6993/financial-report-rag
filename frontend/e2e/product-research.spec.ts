@@ -182,6 +182,65 @@ test("historical chart exposes real periods, top holdings, and source", async ({
   });
 });
 
+test("institutional sector intelligence is dated, filterable, and explicit about unknowns", async ({
+  page,
+}) => {
+  await page.goto("/discover/berkshire");
+  const section = page
+    .getByRole("heading", {
+      name: "Institutional Sector Intelligence",
+      exact: true,
+    })
+    .locator("xpath=ancestor::section");
+  await expect(section).toContainText("Verified historical allocation");
+  await expect(section).toContainText("Information Technology");
+  await expect(section).toContainText("Unknown classification");
+  await expect(section.getByLabel("Reporting period filter")).toBeVisible();
+  await section
+    .getByLabel("Sector filter")
+    .selectOption("Information Technology");
+  await expect(section.getByText(/not a prediction/i)).toBeVisible();
+  await expect(
+    section.getByRole("link", { name: "Original disclosure" }),
+  ).toHaveAttribute("href", /sec\.gov/);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: `test-results/sector-intelligence-${test.info().project.name}.png`,
+    fullPage: true,
+  });
+});
+
+test("Ask routes sector questions away from company financial statements", async ({
+  page,
+}) => {
+  await page.goto("/ask");
+  await page
+    .getByLabel("What would you like to investigate?")
+    .fill("May I know current investor likely to invest in which sector?");
+  await page
+    .getByRole("button", { name: "Ask ThesisLens", exact: true })
+    .click();
+  for (const title of [
+    "Short Answer",
+    "Sector Allocation Table",
+    "Reported Accumulation / Reduction",
+    "Historical Changes",
+    "What the Data Does Not Tell Us",
+  ]) {
+    await expect(
+      page.getByRole("heading", { name: title, exact: true }),
+    ).toBeVisible();
+  }
+  const answer = page.getByRole("article");
+  await expect(answer).not.toContainText("Numbers That Matter");
+  await expect(answer).not.toContainText("Free cash flow");
+  await expect(answer.getByText(/Source Citations/)).toBeVisible();
+});
+
 test("Ask quarterly numbers and annual context stay separate", async ({
   page,
 }) => {
