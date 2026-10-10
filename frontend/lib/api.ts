@@ -209,6 +209,128 @@ export const portfolioOverlapSchema = z.object({
   changes: z.array(changeSchema.extend({ institution_id: z.string() })),
   coverage_notes: z.array(z.string()),
 });
+const sectorActivitySchema = z.object({
+  NEW: z.number(),
+  INCREASED: z.number(),
+  REDUCED: z.number(),
+  EXITED: z.number(),
+  UNCHANGED: z.number().optional(),
+});
+const sectorAllocationSchema = z.object({
+  sector: z.string(),
+  reported_value: z.number(),
+  weight: z.number(),
+  holding_count: z.number(),
+  holdings: z.array(
+    z.object({
+      ticker: z.string(),
+      issuer: z.string(),
+      cusip: z.string(),
+      security_class: z.string(),
+      put_call: z.string(),
+      shares: z.number(),
+      reported_value: z.number(),
+      weight: z.number(),
+      sector: z.string(),
+      classification_status: z.string(),
+      taxonomy: z.string(),
+      taxonomy_code: z.string().nullable(),
+      classification_source_url: z.string().nullable(),
+    }),
+  ),
+});
+const sectorInstitutionSchema = z.object({
+  institution_id: z.string(),
+  name: z.string(),
+  investor: z.string(),
+  reporting_period: z.string(),
+  previous_period: z.string().nullable(),
+  filing_date: z.string(),
+  source_url: z.string(),
+  source_type: z.string(),
+  available_periods: z.array(z.string()),
+  taxonomy: z.string(),
+  taxonomy_source_url: z.string(),
+  sector_filter: z.string().nullable(),
+  allocation: z.array(sectorAllocationSchema),
+  sector_changes: z.array(
+    z.object({
+      sector: z.string(),
+      weight_before: z.number(),
+      weight_after: z.number(),
+      weight_change: z.number(),
+      reported_value_before: z.number(),
+      reported_value_after: z.number(),
+      position_activity: sectorActivitySchema,
+    }),
+  ),
+  position_changes: z.array(
+    z.object({
+      sector: z.string(),
+      issuer: z.string(),
+      ticker: z.string(),
+      cusip: z.string(),
+      security_class: z.string(),
+      put_call: z.string(),
+      activity: z.string(),
+      shares_before: z.number(),
+      comparable_shares_before: z.number(),
+      shares_after: z.number(),
+      share_change: z.number(),
+      corporate_action_adjusted: z.boolean(),
+      corporate_action_source_url: z.string().nullable(),
+      share_change_interpretation: z.string(),
+    }),
+  ),
+  coverage: z.object({
+    holding_count: z.number(),
+    option_holding_count: z.number(),
+    classified_holding_count: z.number(),
+    classified_holding_percentage: z.number(),
+    reported_value_total: z.number(),
+    classified_reported_value: z.number(),
+    classified_value_percentage: z.number(),
+    unknown_reported_value: z.number(),
+    unknown_value_percentage: z.number(),
+  }),
+  concentration: z.object({
+    largest_sector: z.string().nullable(),
+    largest_sector_weight: z.number().nullable(),
+    herfindahl_index: z.number().nullable(),
+  }),
+  comparison: z.object({
+    available: z.boolean(),
+    reason: z.string().nullable(),
+    weight_change_note: z.string(),
+    share_change_note: z.string(),
+  }),
+});
+export const sectorIntelligenceSchema = z.object({
+  institutions: z.array(sectorInstitutionSchema),
+  unavailable_institutions: z.array(z.string()),
+  aggregate: z.array(
+    z.object({
+      sector: z.string(),
+      reported_value: z.number(),
+      average_weight: z.number(),
+      institution_count: z.number(),
+      holding_count: z.number(),
+      position_activity: sectorActivitySchema,
+    }),
+  ),
+  coverage: z.object({
+    institution_count: z.number(),
+    requested_institution_count: z.number(),
+    reported_value_total: z.number(),
+    classified_reported_value: z.number(),
+    classified_value_percentage: z.number(),
+    unknown_value_percentage: z.number(),
+  }),
+  period_filter: z.string().nullable(),
+  sector_filter: z.string().nullable(),
+  coverage_notes: z.array(z.string()),
+  interpretation_policy: z.string(),
+});
 export const companySchema = z.object({
   ticker: z.string(),
   available: z.boolean(),
@@ -432,6 +554,16 @@ export const answerSchema = z.object({
       annual_context: z.array(z.string()).default([]),
     })
     .optional(),
+  sector_analysis: sectorIntelligenceSchema.optional(),
+  sector_sections: z
+    .object({
+      short_answer: z.string(),
+      accumulation: z.array(z.string()),
+      reductions: z.array(z.string()),
+      historical_changes: z.array(z.string()),
+      limitations: z.array(z.string()),
+    })
+    .optional(),
   synthesis_available: z.boolean().optional(),
   model: z.string().optional(),
   intent: z
@@ -439,6 +571,7 @@ export const answerSchema = z.object({
       "general",
       "financial_research",
       "portfolio_analysis",
+      "institutional_sector_analysis",
       "current_public_information",
       "unsupported",
     ])
@@ -489,6 +622,7 @@ export const disclosureSchema = z.object({
 
 export type Investor = z.infer<typeof investorSchema>;
 export type PortfolioOverlap = z.infer<typeof portfolioOverlapSchema>;
+export type SectorIntelligence = z.infer<typeof sectorIntelligenceSchema>;
 export type Evidence = z.infer<typeof evidenceSchema>;
 export type Suggestion = z.infer<typeof suggestionSchema>;
 export type Thesis = z.infer<typeof thesisSchema>;

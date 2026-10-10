@@ -35,6 +35,7 @@ from src.portfolios import (
     fetch_ark_holdings,
 )
 from src.sec import normalize_ticker
+from src.sector_intelligence import analyze_sector_exposure
 from src.thesis import evaluate_thesis
 from src.thesis_research import (
     company_changes,
@@ -347,6 +348,258 @@ class ResearchService:
         return analyze_overlap(
             {key: self.portfolios(key) for key in unique_ids}, period=period
         )
+
+    def sector_intelligence(
+        self,
+        institution_ids: list[str] | None = None,
+        period: str | None = None,
+        sector: str | None = None,
+    ) -> dict:
+        requested = list(dict.fromkeys(institution_ids or []))
+        if requested:
+            missing = [key for key in requested if self.registry.get(key) is None]
+            if missing:
+                raise ValueError("Unknown institution: " + ", ".join(missing))
+        else:
+            requested = [
+                institution.id
+                for institution in self.registry.all()
+                if self.portfolios(institution.id)
+            ]
+        if len(requested) > 10:
+            raise ValueError("Select no more than 10 institutions.")
+        institutions = []
+        unavailable = []
+        for key in requested:
+            snapshots = self.portfolios(key)
+            if not snapshots:
+                unavailable.append(key)
+                continue
+            institution = self.registry.get(key)
+            try:
+                analysis = analyze_sector_exposure(
+                    snapshots,
+                    period=period,
+                    sector=sector,
+                )
+            except ValueError:
+                unavailable.append(key)
+                continue
+            institutions.append(
+                {
+                    **analysis,
+                    "name": institution.name if institution else key,
+                    "investor": institution.investor if institution else "",
+                }
+            )
+        aggregate_rows: dict[str, dict] = {}
+        for analysis in institutions:
+            for allocation in analysis["allocation"]:
+                row = aggregate_rows.setdefault(
+                    allocation["sector"],
+                    {
+                        "sector": allocation["sector"],
+                        "reported_value": 0.0,
+                        "average_weight": 0.0,
+                        "institution_count": 0,
+                        "holding_count": 0,
+                        "position_activity": {
+                            "NEW": 0,
+                            "INCREASED": 0,
+                            "REDUCED": 0,
+                            "EXITED": 0,
+                        },
+                    },
+                )
+                row["reported_value"] += allocation["reported_value"]
+                row["average_weight"] += allocation["weight"]
+                row["institution_count"] += 1
+                row["holding_count"] += allocation["holding_count"]
+            for change in analysis["sector_changes"]:
+                row = aggregate_rows.get(change["sector"])
+                if row is None:
+                    continue
+                for activity in ("NEW", "INCREASED", "REDUCED", "EXITED"):
+                    row["position_activity"][activity] += change[
+                        "position_activity"
+                    ][activity]
+        divisor = len(institutions)
+        aggregate = sorted(
+            aggregate_rows.values(),
+            key=lambda item: (-item["reported_value"], item["sector"]),
+        )
+        for row in aggregate:
+            row["average_weight"] = (
+                row["average_weight"] / divisor if divisor else 0.0
+            )
+        known_value = sum(
+            analysis["coverage"]["classified_reported_value"]
+            for analysis in institutions
+        )
+        total_value = sum(
+            analysis["coverage"]["reported_value_total"]
+            for analysis in institutions
+        )
+        return {
+            "institutions": institutions,
+            "unavailable_institutions": unavailable,
+            "aggregate": aggregate,
+            "coverage": {
+                "institution_count": len(institutions),
+                "requested_institution_count": len(requested),
+                "reported_value_total": total_value,
+                "classified_reported_value": known_value,
+                "classified_value_percentage": known_value / total_value
+                if total_value
+                else 0.0,
+                "unknown_value_percentage": (total_value - known_value) / total_value
+                if total_value
+                else 0.0,
+            },
+            "period_filter": period,
+            "sector_filter": sector,
+            "coverage_notes": [
+                "Each institution uses its latest saved successful snapshot at or before the selected period; reporting dates can differ.",
+                "SEC Form 13F is delayed and partial. Daily fund disclosures, when present, are labeled separately and are not treated as quarterly 13F data.",
+                *(
+                    [
+                        "No usable saved snapshot was available for: "
+                        + ", ".join(unavailable)
+                        + "."
+                    ]
+                    if unavailable
+                    else []
+                ),
+            ],
+            "interpretation_policy": (
+                "Verified allocations and reported share changes are historical. "
+                "They do not establish investment intent. This is not a prediction "
+                "of future purchases."
+            ),
+        }
+
+    def _institution_ids_in_question(self, question: str) -> list[str]:
+        query = question.casefold()
+        aliases = {
+            "buffett": "berkshire",
+            "warren buffett": "berkshire",
+            "ackman": "pershing",
+            "cathie wood": "ark",
+            "wood": "ark",
+            "burry": "scion",
+            "tepper": "appaloosa",
+            "druckenmiller": "duquesne",
+        }
+        selected = [key for alias, key in aliases.items() if alias in query]
+        for institution in self.registry.all():
+            tokens = (institution.id, institution.name.casefold())
+            if any(token and token in query for token in tokens):
+                selected.append(institution.id)
+        return list(dict.fromkeys(selected))
+
+    def _sector_answer(self, question: str) -> dict:
+        selected = self._institution_ids_in_question(question)
+        data = self.sector_intelligence(selected or None)
+        aggregate = data["aggregate"]
+        count = data["coverage"]["institution_count"]
+        if not count:
+            short = (
+                "No saved institutional disclosure is available for sector analysis. "
+                "A verified dated portfolio snapshot is required."
+            )
+        elif aggregate:
+            leader = aggregate[0]
+            scope = (
+                data["institutions"][0]["name"]
+                if len(data["institutions"]) == 1
+                else f"{count} institutions with saved disclosures"
+            )
+            short = (
+                f"In the latest comparable saved data for {scope}, "
+                f"{leader['sector']} has the largest combined reported value. "
+                "This is historical allocation evidence, not a prediction of the next purchase."
+            )
+        else:
+            short = "The saved disclosures contain no sector-classifiable reported positions."
+        accumulation = []
+        reductions = []
+        historical = []
+        for analysis in data["institutions"]:
+            for change in analysis["position_changes"]:
+                label = (
+                    f"{analysis['name']} · {change['sector']} · "
+                    f"{change['ticker'] or change['issuer']}: {change['activity'].lower()} "
+                    f"reported shares ({analysis['previous_period']} to "
+                    f"{analysis['reporting_period']})."
+                )
+                if change["activity"] in {"NEW", "INCREASED"}:
+                    accumulation.append(label)
+                elif change["activity"] in {"REDUCED", "EXITED"}:
+                    reductions.append(label)
+            for change in analysis["sector_changes"][:5]:
+                historical.append(
+                    f"{analysis['name']} · {change['sector']}: "
+                    f"{change['weight_change']:+.1%} disclosed weight change."
+                )
+        limitations = [
+            "13F data is delayed and incomplete; it omits many asset classes, short positions, and some hedges.",
+            "A sector-weight change can reflect security-price movement as well as position changes.",
+            "Reported share changes do not identify transaction dates, prices, rationale, or future intent.",
+            "Unknown classifications remain in coverage and are not silently removed.",
+        ]
+        evidence = [
+            {
+                "text": (
+                    f"{analysis['name']} disclosure for {analysis['reporting_period']} "
+                    f"({analysis['coverage']['classified_value_percentage']:.1%} of reported value classified)."
+                ),
+                "period": analysis["reporting_period"],
+                "source_url": analysis["source_url"],
+                "source_type": analysis["source_type"],
+            }
+            for analysis in data["institutions"]
+        ]
+        classification_sources: dict[str, dict] = {}
+        for analysis in data["institutions"]:
+            for allocation in analysis["allocation"]:
+                for holding in allocation["holdings"]:
+                    source_url = holding["classification_source_url"]
+                    if source_url:
+                        classification_sources[source_url] = {
+                            "text": (
+                                f"{holding['ticker'] or holding['issuer']}: "
+                                f"{holding['taxonomy_code']} mapped to "
+                                f"{holding['sector']} by the ThesisLens public SIC taxonomy."
+                            ),
+                            "period": analysis["reporting_period"],
+                            "source_url": source_url,
+                            "source_type": "SEC submissions identity and SIC",
+                        }
+        evidence.extend(list(classification_sources.values())[:10])
+        if data["institutions"]:
+            evidence.append(
+                {
+                    "text": data["institutions"][0]["taxonomy"],
+                    "period": "",
+                    "source_url": data["institutions"][0][
+                        "taxonomy_source_url"
+                    ],
+                    "source_type": "SEC SIC taxonomy",
+                }
+            )
+        return {
+            "answer": short,
+            "evidence": evidence,
+            "source": "Stored official disclosures · identifier-backed SEC SIC sector taxonomy",
+            "sector_analysis": data,
+            "sector_sections": {
+                "short_answer": short,
+                "accumulation": accumulation[:12],
+                "reductions": reductions[:12],
+                "historical_changes": historical[:20],
+                "limitations": limitations,
+            },
+        }
 
     def chunks(self, ticker: str) -> list[dict]:
         company = self.cached_company(ticker) or {}
@@ -770,6 +1023,8 @@ class ResearchService:
         if route.intent is AskIntent.CURRENT_PUBLIC_INFORMATION:
             result = self.market_pulse.answer(question, route.ticker or "")
             return {**result, **metadata}
+        if route.intent is AskIntent.INSTITUTIONAL_SECTOR_ANALYSIS:
+            return {**self._sector_answer(question), **metadata}
         if route.intent is AskIntent.PORTFOLIO_ANALYSIS and not route.ticker:
             return {**self._portfolio_overview(question), **metadata}
         if not route.ticker:

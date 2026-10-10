@@ -31,6 +31,7 @@ import {
   ResearchLink,
   Section,
 } from "@/components/research-ui";
+import { SectorIntelligence } from "./sector-intelligence";
 
 function Follow({ investor }: { investor: Investor }) {
   const cache = useQueryClient();
@@ -540,6 +541,7 @@ export function InvestorProfile({ id }: { id: string }) {
           <AllocationChart investor={i} />
         </Section>
       )}
+      {i.holdings.length > 0 && <SectorIntelligence investorId={i.id} />}
       <Section title="Companies Worth Exploring">
         <p className="muted text-sm mb-4">
           Start with a large disclosed position, then verify the business for

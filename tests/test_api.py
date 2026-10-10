@@ -184,6 +184,32 @@ def test_portfolio_overlap_api_rejects_invalid_selection(client):
     )
 
 
+def test_sector_intelligence_api_and_ask_use_saved_disclosures(client):
+    response = client.get(
+        "/api/sector-intelligence", params={"investors": "berkshire"}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["institutions"][0]["reporting_period"] == "2025-06-30"
+    assert data["institutions"][0]["allocation"][0]["sector"] == (
+        "Information Technology"
+    )
+    assert data["coverage"]["unknown_value_percentage"] == 0
+
+    answer = client.post(
+        "/api/ask",
+        json={"question": "Which sectors does Warren Buffett favor?", "mode": "auto"},
+    )
+    assert answer.status_code == 200
+    payload = answer.json()
+    assert payload["intent"] == "institutional_sector_analysis"
+    assert payload["sector_analysis"]["institutions"][0]["institution_id"] == (
+        "berkshire"
+    )
+    assert "Revenue" not in payload["answer"]
+    assert "free cash flow" not in payload["answer"].lower()
+
+
 def test_track_edit_evaluate_history(client):
     suggestions = client.get("/api/company/AAPL/suggested-theses").json()
     assert len(suggestions) == 4

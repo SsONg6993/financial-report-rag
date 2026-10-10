@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { api, answerSchema } from "@/lib/api";
+import { api, answerSchema, money, percent } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { MutationError, Sources } from "@/components/research-ui";
 import {
@@ -15,6 +15,7 @@ import {
 type AskMode = "auto" | "general" | "research";
 const examples = [
   "How do you think medical AI will develop in the future?",
+  "Which sectors are institutional investors buying?",
   "Which recent news may affect my watchlist?",
   "Why did Berkshire reduce AAPL?",
   "Which investors I follow disclose GOOGL?",
@@ -140,7 +141,110 @@ export function AskResearch() {
               </h2>
             </div>
           </div>
-          {m.data.sections ? (
+          {m.data.sector_sections && m.data.sector_analysis ? (
+            <div className="mt-6 space-y-7">
+              <section>
+                <h3>Short Answer</h3>
+                <p className="mt-2 leading-7">
+                  {m.data.sector_sections.short_answer}
+                </p>
+                <p className="source">
+                  Verified historical disclosure · analytical interpretation is
+                  not a prediction
+                </p>
+              </section>
+              <section>
+                <h3>Sector Allocation Table</h3>
+                <div className="mt-3 overflow-x-auto rounded-xl border border-border">
+                  <table className="w-full min-w-[620px] text-left text-sm">
+                    <thead className="border-b border-border bg-background/40 text-xs uppercase tracking-wider muted">
+                      <tr>
+                        <th className="p-3">Sector</th>
+                        <th className="p-3">Avg. disclosed weight</th>
+                        <th className="p-3">Reported value</th>
+                        <th className="p-3">Institutions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {m.data.sector_analysis.aggregate.map((row) => (
+                        <tr
+                          className="border-b border-border/60"
+                          key={row.sector}
+                        >
+                          <td className="p-3 font-medium">{row.sector}</td>
+                          <td className="p-3 font-mono">
+                            {percent(row.average_weight)}
+                          </td>
+                          <td className="p-3 font-mono">
+                            {money(row.reported_value)}
+                          </td>
+                          <td className="p-3">{row.institution_count}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="source">
+                  Unknown classifications are included · classified value
+                  coverage{" "}
+                  {percent(
+                    m.data.sector_analysis.coverage
+                      .classified_value_percentage,
+                  )}
+                </p>
+              </section>
+              <section>
+                <h3>Reported Accumulation / Reduction</h3>
+                <div className="mt-2 grid gap-4 sm:grid-cols-2">
+                  <div className="rounded-xl border border-border p-4">
+                    <p className="font-medium">Accumulation signals</p>
+                    {(m.data.sector_sections.accumulation.length
+                      ? m.data.sector_sections.accumulation
+                      : ["No comparable reported share increases available."]
+                    ).map((item) => (
+                      <p className="mt-2 text-sm muted" key={item}>
+                        {item}
+                      </p>
+                    ))}
+                  </div>
+                  <div className="rounded-xl border border-border p-4">
+                    <p className="font-medium">Reduction signals</p>
+                    {(m.data.sector_sections.reductions.length
+                      ? m.data.sector_sections.reductions
+                      : ["No comparable reported share reductions available."]
+                    ).map((item) => (
+                      <p className="mt-2 text-sm muted" key={item}>
+                        {item}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              </section>
+              <section>
+                <h3>Historical Changes</h3>
+                <div className="mt-2 space-y-2">
+                  {(m.data.sector_sections.historical_changes.length
+                    ? m.data.sector_sections.historical_changes
+                    : ["A second comparable disclosure is not available."]
+                  ).map((item) => (
+                    <p className="text-sm muted" key={item}>
+                      {item}
+                    </p>
+                  ))}
+                </div>
+              </section>
+              <section>
+                <h3>What the Data Does Not Tell Us</h3>
+                <div className="mt-2 space-y-2">
+                  {m.data.sector_sections.limitations.map((item) => (
+                    <p className="text-sm muted" key={item}>
+                      {item}
+                    </p>
+                  ))}
+                </div>
+              </section>
+            </div>
+          ) : m.data.sections ? (
             <div className="mt-6 space-y-6">
               <section>
                 <h3>Short Answer</h3>
@@ -213,7 +317,10 @@ export function AskResearch() {
           {m.data.evidence.length > 0 && (
             <details className="mt-5">
               <summary className="text-sm text-primary">
-                Sources &amp; evidence ({m.data.evidence.length})
+                {m.data.intent === "institutional_sector_analysis"
+                  ? "Source Citations"
+                  : "Sources & evidence"}{" "}
+                ({m.data.evidence.length})
               </summary>
               <Sources evidence={m.data.evidence} />
             </details>

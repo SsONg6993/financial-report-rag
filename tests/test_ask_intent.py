@@ -31,3 +31,24 @@ def test_current_public_information_and_account_actions_are_distinct():
         route_ask("Execute a trade in my brokerage account").intent
         is AskIntent.UNSUPPORTED
     )
+
+
+def test_institutional_sector_questions_have_a_dedicated_intent():
+    questions = (
+        "May I know current investor likely to invest in which sector?",
+        "Which sectors are institutional investors buying?",
+        "Which sectors does Warren Buffett favor?",
+        "What sectors are gaining institutional exposure?",
+        "Which sectors are investors likely to invest in next?",
+        "Which industries are attracting institutional capital?",
+    )
+    for question in questions:
+        route = route_ask(question)
+        assert route.intent is AskIntent.INSTITUTIONAL_SECTOR_ANALYSIS
+        assert route.ticker is None
+
+
+def test_investor_word_alone_does_not_force_company_research():
+    route = route_ask("What does an investor need to consider?")
+    assert route.intent is AskIntent.GENERAL
+    assert route.ticker is None

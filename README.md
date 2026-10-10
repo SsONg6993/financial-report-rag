@@ -66,6 +66,8 @@ The local notification outbox needs no credentials. For an explicit due RSS refr
 
 Discover includes an interactive 2–5 manager comparison powered only by stored verified disclosures. It provides class-aware CUSIP matching, common and unique holding counts, all-manager and pairwise Jaccard similarity, disclosed-weight overlap, source dates, position changes, historical date playback, and a bounded zoomable/pannable network. See [the V3 calculation and coverage contract](docs/thesislens-v3-portfolio-network.md). Shared holdings are not evidence of shared intent, and 13F data remains delayed and incomplete.
 
+Investor profiles and Ask also expose [Institutional Sector Intelligence](docs/institutional-sector-intelligence.md). It uses a deliberately small CUSIP-keyed registry, official SEC filer SIC metadata, and a documented public SIC-to-sector mapping. Unmapped securities remain **Unknown** and reduce the displayed coverage percentage. Sector weights describe dated reported value; reported share changes are shown separately and never presented as future purchases.
+
 Playwright E2E is isolated: `cd frontend; npm run test:e2e` starts dedicated localhost servers, forces offline mode, initializes/migrates a synthetic database at `.e2e-runtime/thesislens-e2e.sqlite3`, and replaces **only that guarded test database** at the start of each run. The browser tests never connect to `data/local/thesislens.sqlite3`; external QA URLs and a personal `THESISLENS_DB` are rejected before startup. `.e2e-runtime/`, screenshots, browser traces, generated caches, and `.env` are ignored. The fixture contains synthetic public-research data—not copied personal records. Do not guess or restore any user records changed by earlier browser runs.
 
 SQLite V2 migration is additive and transactional. Before upgrading a personal database, stop both app servers and make a dated copy of `data/local/thesislens.sqlite3` to a private backup outside the repository. Do not overwrite the source database if an upgrade fails; preserve it and the backup for diagnosis. Migration tests cover clean install, V1 watchlist/follows/theses/evaluations preservation, idempotence, and rollback on schema conflict.
@@ -79,6 +81,7 @@ Company search uses the free [SEC ticker/CIK/exchange directory](https://www.sec
 | GET | `/api/health`, `/api/readiness` | Lightweight liveness and version-aware local dependency readiness |
 | GET | `/api/home/feed`, `/api/investors` | Discovery, activity, ideas, watchlist |
 | GET | `/api/investors/{id}`, `/holdings`, `/changes` | Profile, reported positions, deterministic share changes |
+| GET | `/api/sector-intelligence?investors={id}&period={date}&sector={name}` | Dated identifier-backed sector allocation and comparable-period changes |
 | PUT | `/api/investors/{id}/follow` | Persist followed institution |
 | GET | `/api/company/{ticker}`, `/changes`, `/suggested-theses`, `/theses` | Company research and evidence |
 | GET | `/api/companies/search?q=`, `/api/companies/resolve?q=` | Validated SEC identity suggestions and explicit resolution |
@@ -117,7 +120,7 @@ cd C:\Users\User\Documents\Projects\financial-report-rag
 
 `--company` and `--investor` can be repeated. `THESISLENS_OFFLINE=true` disables request-triggered network refresh while retaining cached functionality.
 
-Featured adapters: Berkshire, Pershing, Appaloosa, Bridgewater, Scion, Duquesne, Soros, Tiger Global, Coatue, and official ARKK. Unavailable/stale investors stay visible. Exact issuer-name ticker matching is deliberately incomplete; an unmapped security is not guessed. Common share classes can be resolved from explicit cached SEC filing-cover rows (for example Alphabet Class A/GOOGL and Class C/GOOG), with the mapping source retained. Duplicate legacy cache keys are deduplicated by source/period before comparisons. Sector exposure can remain Unclassified. Originals only: 13F amendments are not consolidated.
+Featured adapters: Berkshire, Pershing, Appaloosa, Bridgewater, Scion, Duquesne, Soros, Tiger Global, Coatue, and official ARKK. Unavailable/stale investors stay visible. Exact issuer-name ticker matching is deliberately incomplete; an unmapped security is not guessed. Common share classes can be resolved from explicit cached SEC filing-cover rows (for example Alphabet Class A/GOOGL and Class C/GOOG), with the mapping source retained. Duplicate legacy cache keys are deduplicated by source/period before comparisons. Sector exposure remains Unknown unless a CUSIP has an explicit sourced classification. Originals only: 13F amendments are not consolidated.
 
 ### Suggested theses and What Changed
 

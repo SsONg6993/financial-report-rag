@@ -144,6 +144,18 @@ def portfolio_overlap(
         raise HTTPException(422, str(exc)) from exc
 
 
+@app.get("/api/sector-intelligence")
+def sector_intelligence(
+    investors: Annotated[list[str] | None, Query()] = None,
+    period: str | None = None,
+    sector: str | None = None,
+):
+    try:
+        return service.sector_intelligence(investors, period, sector)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @app.get("/api/companies/search")
 def search_companies(q: str = ""):
     if len(q) > 100:
