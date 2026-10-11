@@ -166,12 +166,14 @@ An evidence-driven investment thesis monitoring and public-disclosure research s
 
 ThesisLens helps investors track whether new company evidence strengthens or weakens their own investment thesis, while using public institutional and public-official disclosures for research and idea discovery. It reports evidence relationships and research questions, without BUY / SELL / HOLD recommendations or a numeric investment score.
 
-### Four internal/debug pages
+### Four primary destinations
 
 - **Home**: locally persisted watchlist, thesis-health counts, meaningful comparable-period changes, and followed disclosures.
-- **Research**: a compact company summary, editable thesis points, evidence evaluation, thesis timeline, dated changes, and an investigation checklist. Valuation and technical evidence tools are collapsed.
-- **Public Portfolios**: official institutional disclosures, reported holdings and share changes, plus a separate OGE public-financial-disclosure section.
-- **Ask**: questions across locally loaded theses, company facts, filing evidence, and public portfolio snapshots.
+- **Explore**: institutional portfolios, overlap analysis, range-preserving public-official disclosures, and contextual access to company Research.
+- **Intelligence**: the personalized public-source feed and contextual access to Market Pulse.
+- **Ask AI**: intent-routed questions across locally loaded theses, company facts, filing evidence, public portfolio snapshots, and configured local general AI.
+
+Runtime **Status** remains available as a secondary system entry. Legacy `/discover`, `/research`, `/intelligence`, and `/market-pulse` URLs remain compatible; `/discover` redirects to `/explore`.
 
 The previous ten-tab dashboard has been replaced. Financial calculations, risk extraction, valuation, retrieval, reranking, evaluation, and optional providers remain reusable backend modules.
 
@@ -243,7 +245,7 @@ Narrative evaluation retrieves current filing evidence and a comparable same-for
 
 13F has no ticker or sector fields. Unambiguous exact issuer-name matches against the official SEC ticker directory can supply tickers; unmatched/ambiguous classes need user verification. Optional Yahoo Finance sector enrichment shows coverage and leaves unmatched holdings unclassified.
 
-OGE reports are not exact brokerage portfolios. Amount/income ranges are preserved, weights are never inferred, and unknown filing dates remain unknown. The selected official May 2026 transaction PDF has a noisy text layer: invalid rows are excluded and source-page excerpts are available for verification. Annual PDFs retain source excerpts; reliable annual section normalization and OCR require further work. OGE access requirements may prevent automatic downloads.
+OGE reports are not exact brokerage portfolios. Amount/income ranges are preserved, weights are never inferred, and unknown filing dates remain unknown. OGE 278-T transaction reports use a form-specific row validator; OGE 278e annual reports remain a separate source-excerpt workflow. The selected official May 2026 transaction PDF has a degraded text layer: only rows with validated dates, transaction types, notification fields, and official amount bands are shown, while rejected rows remain counted by reason. Every verified row retains its source page. OCR is reserved for unusable text layers and requires a compatible local OCR runtime; it is not used to inflate coverage. OGE access requirements may prevent automatic downloads.
 
 ## AAPL + Berkshire example
 

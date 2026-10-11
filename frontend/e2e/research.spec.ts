@@ -31,7 +31,7 @@ test("light mode is optional and persists during navigation", async ({
   await page.goto("/research/AAPL");
   await page.getByRole("button", { name: "Switch to light mode" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-  await page.getByRole("link", { name: "Discover", exact: true }).click();
+  await page.getByRole("link", { name: "Explore", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await expect(
     page.getByRole("heading", { name: "Featured investors" }),
@@ -74,7 +74,7 @@ test("rendered disclosure context and viewport layout", async ({ page }) => {
   ).toBe(true);
 });
 
-test("real Home and Discover have dated disclosure data", async ({ page }) => {
+test("real Home and Explore have dated disclosure data", async ({ page }) => {
   await page.goto("/");
   await expect(
     page.getByRole("heading", { name: "Institutional Activity" }),
@@ -84,7 +84,7 @@ test("real Home and Discover have dated disclosure data", async ({ page }) => {
     path: `test-results/home-${test.info().project.name}.png`,
     fullPage: true,
   });
-  await page.getByRole("link", { name: "Discover", exact: true }).click();
+  await page.getByRole("link", { name: "Explore", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Featured investors" }),
   ).toBeVisible();
