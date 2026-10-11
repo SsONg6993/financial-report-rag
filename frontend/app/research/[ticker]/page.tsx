@@ -1,6 +1,6 @@
 import { CompanyResearch } from "@/features/research/company";
 import { PulseResearchContext } from "@/features/market-pulse/pulse";
-import { InstitutionalActivity } from "@/features/intelligence/feed";
+import { DeferredInstitutionalActivity } from "@/features/research/deferred-institutional-activity";
 export default async function Research({
   params,
   searchParams,
@@ -16,9 +16,7 @@ export default async function Research({
         <PulseResearchContext eventId={event} ticker={ticker.toUpperCase()} />
       )}
       <CompanyResearch ticker={ticker.toUpperCase()} />
-      <div id="institutional-ownership" className="scroll-mt-24">
-        <InstitutionalActivity ticker={ticker.toUpperCase()} />
-      </div>
+      <DeferredInstitutionalActivity ticker={ticker.toUpperCase()} />
     </div>
   );
 }

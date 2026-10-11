@@ -89,9 +89,14 @@ class ResearchService:
             "website": WebsiteFeedProvider(),
         }
 
-    def cache_state(self, kind: str, key: str) -> dict:
-        cached = self.store.snapshots("refresh", f"{kind}:{key}")
-        state = cached[0] if cached else {}
+    def cache_state(
+        self, kind: str, key: str, cached_state: dict | None = None
+    ) -> dict:
+        if cached_state is None:
+            cached = self.store.snapshots("refresh", f"{kind}:{key}", limit=1)
+            state = cached[0] if cached else {}
+        else:
+            state = cached_state
         saved = state.get("checked_at")
         try:
             age = (
@@ -222,11 +227,14 @@ class ResearchService:
         data = self.store.snapshots("company", normalize_ticker(ticker))
         return data[0] if data else None
 
-    def portfolios(self, key: str) -> list[PortfolioSnapshot]:
+    def portfolios(
+        self, key: str, limit: int | None = None
+    ) -> list[PortfolioSnapshot]:
         # Legacy snapshots were keyed by accession; the API uses reporting period.
         # The same filing can therefore exist under two cache keys, not two periods.
         unique = {}
-        for row in self.store.snapshots("portfolio", key):
+        raw_limit = limit * 4 if limit is not None else None
+        for row in self.store.snapshots("portfolio", key, raw_limit):
             snapshot = PortfolioSnapshot.from_dict(row)
             token = (snapshot.source_type, snapshot.reporting_period)
             old = unique.get(token)
@@ -241,15 +249,34 @@ class ResearchService:
             )
             if old is None or quality > old_quality:
                 unique[token] = snapshot
-        return sorted(unique.values(), key=lambda s: s.reporting_period, reverse=True)
+        snapshots = sorted(
+            unique.values(), key=lambda s: s.reporting_period, reverse=True
+        )
+        return snapshots[:limit] if limit is not None else snapshots
 
-    def investor(self, key: str) -> dict:
+    def investor(
+        self,
+        key: str,
+        *,
+        holdings_limit: int | None = None,
+        include_changes: bool = True,
+        include_entry_prices: bool = True,
+        snapshot_limit: int = 8,
+        _snapshots: list[PortfolioSnapshot] | None = None,
+        _followed: bool | None = None,
+        _refresh_state: dict | None = None,
+    ) -> dict:
         institution = self.registry.get(key)
         if institution is None:
             raise ValueError("Investor not found")
-        snapshots = self.portfolios(key)
+        snapshots = (
+            _snapshots
+            if _snapshots is not None
+            else self.portfolios(key, limit=snapshot_limit)
+        )
         latest = snapshots[0] if snapshots else None
-        state = self.cache_state("ark" if key == "ark" else "portfolio", key)
+        refresh_kind = "ark" if key == "ark" else "portfolio"
+        state = self.cache_state(refresh_kind, key, _refresh_state)
         freshness = (
             disclosure_freshness(
                 latest.reporting_period, source_type=latest.source_type
@@ -266,8 +293,26 @@ class ResearchService:
         previous_by_key = (
             {holding.key: holding for holding in previous.holdings} if previous else {}
         )
+        source_holdings = latest.holdings if latest else []
+        if holdings_limit is not None:
+            source_holdings = source_holdings[:holdings_limit]
+        verified_tickers = [
+            holding.ticker
+            for holding in source_holdings
+            if holding.ticker
+            and (
+                holding.ticker_source
+                or (latest and latest.source_type == "Official ARKK daily fund holdings")
+                or (latest and "unambiguous exact issuer-name matches" in str(latest.notes))
+            )
+        ]
+        market_by_ticker = (
+            self.store.latest_snapshots("market", verified_tickers)
+            if include_entry_prices
+            else {}
+        )
         holdings = []
-        for holding in latest.holdings if latest else []:
+        for holding in source_holdings:
             ticker_verified = bool(
                 holding.ticker
                 and (
@@ -276,28 +321,29 @@ class ResearchService:
                     or "unambiguous exact issuer-name matches" in str(latest.notes)
                 )
             )
-            market_rows = (
-                self.store.snapshots("market", holding.ticker)
-                if ticker_verified
-                else []
-            )
             holdings.append(
                 {
                     **asdict(holding),
                     "ticker_verified": ticker_verified,
-                    "entry_price_estimate": estimate_entry_price(
-                        holding,
-                        previous_by_key.get(holding.key),
-                        previous,
-                        latest,
-                        market_rows[0] if market_rows else None,
+                    "entry_price_estimate": (
+                        estimate_entry_price(
+                            holding,
+                            previous_by_key.get(holding.key),
+                            previous,
+                            latest,
+                            market_by_ticker.get(holding.ticker),
+                        )
+                        if include_entry_prices
+                        else {}
                     ),
                 }
             )
         return {
             **asdict(institution),
             "style_tags": institution.style.split(" / "),
-            "followed": key in self.store.follows(),
+            "followed": (
+                _followed if _followed is not None else key in self.store.follows()
+            ),
             "available": bool(latest),
             "latest_period": latest.reporting_period if latest else None,
             "filing_date": latest.filing_date if latest else None,
@@ -309,7 +355,7 @@ class ResearchService:
                 {**c, "pct_change": c["share_change_pct"]}
                 for c in compare_portfolios(snapshots[1], latest)
             ]
-            if len(snapshots) > 1
+            if include_changes and len(snapshots) > 1
             else [],
             "timeline": [
                 {
@@ -343,6 +389,42 @@ class ResearchService:
 
     def investors(self) -> list[dict]:
         return [self.investor(i.id) for i in self.registry.all()]
+
+    def investor_summaries(self) -> list[dict]:
+        summaries, _ = self._investor_summaries_with_snapshots()
+        return summaries
+
+    def _investor_summaries_with_snapshots(
+        self,
+    ) -> tuple[list[dict], dict[str, list[PortfolioSnapshot]]]:
+        institutions = self.registry.all()
+        followed = set(self.store.follows())
+        refresh_ids = [
+            f"{'ark' if institution.id == 'ark' else 'portfolio'}:{institution.id}"
+            for institution in institutions
+        ]
+        refresh_states = self.store.latest_snapshots("refresh", refresh_ids)
+        summaries = []
+        snapshots_by_id = {}
+        for institution in institutions:
+            snapshots = self.portfolios(institution.id, limit=2)
+            snapshots_by_id[institution.id] = snapshots
+            refresh_kind = "ark" if institution.id == "ark" else "portfolio"
+            summaries.append(
+                self.investor(
+                    institution.id,
+                    holdings_limit=3,
+                    include_changes=False,
+                    include_entry_prices=False,
+                    snapshot_limit=2,
+                    _snapshots=snapshots,
+                    _followed=institution.id in followed,
+                    _refresh_state=refresh_states.get(
+                        f"{refresh_kind}:{institution.id}", {}
+                    ),
+                )
+            )
+        return summaries, snapshots_by_id
 
     def portfolio_overlap(
         self, institution_ids: list[str], period: str | None = None
@@ -912,24 +994,32 @@ class ResearchService:
         return {**thesis, **result, "history": self.store.history(thesis["id"])}
 
     def home(self) -> dict:
-        investors = self.investors()
+        investors, snapshots_by_id = self._investor_summaries_with_snapshots()
         activity = []
         company_holders: dict[str, list[dict]] = {}
         for investor in investors:
-            for change in investor["changes"]:
+            snapshots = snapshots_by_id[investor["id"]]
+            latest = snapshots[0] if snapshots else None
+            changes = (
+                compare_portfolios(snapshots[1], latest)
+                if len(snapshots) > 1
+                else []
+            )
+            for change in changes:
                 if change["activity"] != "UNCHANGED":
                     activity.append(
                         {
                             **change,
+                            "pct_change": change["share_change_pct"],
                             "institution": investor["name"],
                             "institution_id": investor["id"],
                             "source_type": investor["source_type"],
                             "freshness": investor["freshness"],
                         }
                     )
-            for holding in investor["holdings"]:
-                if holding["ticker"] and not holding["put_call"]:
-                    company_holders.setdefault(holding["ticker"], []).append(investor)
+            for holding in latest.holdings if latest else []:
+                if holding.ticker and not holding.put_call:
+                    company_holders.setdefault(holding.ticker, []).append(investor)
         activity.sort(
             key=lambda r: (r.get("filing_date", ""), bool(r.get("ticker"))),
             reverse=True,

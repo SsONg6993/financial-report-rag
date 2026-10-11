@@ -67,6 +67,7 @@ def summarize(event, config):
             json={
                 "model": config.ollama_model,
                 "stream": False,
+                "keep_alive": "30s",
                 "format": schema,
                 "think": False,
                 "options": {"temperature": 0, "num_predict": 100},

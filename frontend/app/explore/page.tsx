@@ -3,9 +3,7 @@ import {
   exploreNavigation,
   SectionNavigation,
 } from "@/components/section-navigation";
-import { InvestorList } from "@/features/discover/investors";
-import { PublicOfficials } from "@/features/discover/public-officials";
-import { PortfolioNetwork } from "@/features/portfolio-network/portfolio-network";
+import { ExploreContent } from "@/features/explore/content";
 
 export default function ExplorePage() {
   return (
@@ -25,9 +23,7 @@ export default function ExplorePage() {
         ariaLabel="Explore sections"
         items={exploreNavigation}
       />
-      <PortfolioNetwork />
-      <InvestorList />
-      <PublicOfficials />
+      <ExploreContent />
     </div>
   );
 }

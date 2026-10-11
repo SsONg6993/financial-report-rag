@@ -43,6 +43,12 @@ test("light mode is optional and persists during navigation", async ({
 });
 
 test("rendered disclosure context and viewport layout", async ({ page }) => {
+  const disclosureRequests: string[] = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path === "/api/insiders/AAPL" || path === "/api/ownership/AAPL")
+      disclosureRequests.push(path);
+  });
   await page.goto("/research/AAPL");
   await page
     .getByRole("heading", { name: "Ideas to Track", exact: true })
@@ -50,6 +56,7 @@ test("rendered disclosure context and viewport layout", async ({ page }) => {
   await page.screenshot({
     path: `test-results/research-viewport-${test.info().project.name}.png`,
   });
+  expect(disclosureRequests).toEqual([]);
   await page
     .getByText("Advanced tracking, disclosures, and source details", {
       exact: true,

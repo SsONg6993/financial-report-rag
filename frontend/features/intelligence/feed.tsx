@@ -52,6 +52,7 @@ export function IntelligenceFeed({
         { signal },
       ),
     refetchInterval: 120_000,
+    staleTime: 60_000,
   });
   const events = useMemo(() => {
     const cutoff = days ? Date.now() - days * 86_400_000 : 0;

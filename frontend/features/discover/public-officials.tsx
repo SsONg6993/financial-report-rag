@@ -282,6 +282,7 @@ export function PublicOfficials() {
   const query = useQuery({
     queryKey: ["public-officials"],
     queryFn: ({ signal }) => api("/public-officials", schema, { signal }),
+    staleTime: 30 * 60_000,
   });
 
   return (

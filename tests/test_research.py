@@ -255,11 +255,18 @@ def test_general_llm_uses_only_question_with_installed_model(monkeypatch):
                 "response": "Medical AI will depend on clinical validation.",
             }
 
+    payload = {}
+
+    def generate(*_args, **kwargs):
+        payload.update(kwargs["json"])
+        return Response()
+
     monkeypatch.setattr("src.llm.requests.get", lambda *_args, **_kwargs: Response())
-    monkeypatch.setattr("src.llm.requests.post", lambda *_args, **_kwargs: Response())
+    monkeypatch.setattr("src.llm.requests.post", generate)
     result = generate_general_answer(
         "How will medical AI develop in the future?", "qwen3:4b"
     )
     assert result.available
     assert "Medical AI" in result.answer
     assert "AAPL" not in result.answer
+    assert payload["keep_alive"] == "30s"
