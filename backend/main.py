@@ -293,10 +293,31 @@ def public_officials():
             "disclosure_type": d["disclosure_type"],
             "filing_date": d.get("filing_date", ""),
             "source_document_date": d.get("source_document_date", ""),
+            "certification_date": d.get("certification_date", ""),
             "source_url": d["source_url"],
-            "records": d.get("records", [])[:50],
+            "records": d.get("records", [])[:1000],
             "notes": d.get("notes", ""),
             "table_validation_rate": d.get("table_validation_rate"),
+            "extraction": d.get(
+                "extraction",
+                {
+                    "status": "review_required" if not d.get("records") else "partial_verified",
+                    "method": "legacy_table_extraction",
+                    "text_layer_status": "unknown",
+                    "ocr_used": False,
+                    "pages_total": len(d.get("excerpts", [])),
+                    "pages_with_text": 0,
+                    "pages_with_tables": 0,
+                    "raw_fragment_count": 0,
+                    "candidate_count": len(d.get("records", [])) + d.get("rejected_rows", 0),
+                    "verified_count": len(d.get("records", [])),
+                    "rejected_count": d.get("rejected_rows", 0),
+                    "deduplicated_count": 0,
+                    "coverage_rate": d.get("table_validation_rate", 0) or 0,
+                    "confidence": "unknown",
+                    "rejection_reasons": {},
+                },
+            ),
         }
         for d in documents[:3]
     ]
