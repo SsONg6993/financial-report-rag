@@ -133,6 +133,15 @@ def test_feed_source_dates_and_valid_share_change(client):
     assert len(data["investors"]) == len(INSTITUTIONS)
 
 
+def test_investor_collection_summary_is_bounded(client):
+    response = client.get("/api/investors/summaries")
+    assert response.status_code == 200
+    summaries = response.json()
+    assert len(summaries) == len(INSTITUTIONS)
+    assert all(len(item["holdings"]) <= 3 for item in summaries)
+    assert all(item["changes"] == [] for item in summaries)
+
+
 def test_missing_sources_are_not_filled(client):
     assert client.get("/api/investors/ark").json()["available"] is False
     company = client.get("/api/company/NVDA").json()

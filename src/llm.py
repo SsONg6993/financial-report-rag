@@ -38,7 +38,12 @@ def generate_answer(
     try:
         response = requests.post(
             f"{base_url.rstrip('/')}/api/generate",
-            json={"model": model, "prompt": prompt, "stream": False},
+            json={
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "keep_alive": "30s",
+            },
             timeout=180,
         )
         response.raise_for_status()
@@ -154,7 +159,12 @@ def generate_general_answer(
             try:
                 response = requests.post(
                     f"{endpoint}/api/generate",
-                    json={"model": model, "prompt": prompt, "stream": False},
+                    json={
+                        "model": model,
+                        "prompt": prompt,
+                        "stream": False,
+                        "keep_alive": "30s",
+                    },
                     timeout=(2, max(5.0, inference_timeout)),
                 )
                 response.raise_for_status()

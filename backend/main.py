@@ -1,6 +1,7 @@
 """Run: python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000."""
 
 import logging
+import os
 from typing import Annotated, Literal
 
 from dotenv import load_dotenv
@@ -131,6 +132,11 @@ def home(background: BackgroundTasks):
 @app.get("/api/investors", response_model=list[Investor])
 def investors():
     return service.investors()
+
+
+@app.get("/api/investors/summaries", response_model=list[Investor])
+def investor_summaries():
+    return service.investor_summaries()
 
 
 @app.get("/api/portfolio-overlap")
@@ -413,9 +419,14 @@ def market_pulse_impacts(event_id: str):
 
 
 @app.get("/api/intelligence/feed")
-def intelligence_feed(category: str = "all", limit: int = 50):
+def intelligence_feed(
+    background: BackgroundTasks, category: str = "all", limit: int = 50
+):
     try:
-        return service.intelligence.feed(category, limit)
+        if os.getenv("THESISLENS_OFFLINE", "false").lower() == "true":
+            return service.intelligence.feed(category, limit)
+        service.intelligence.schedule(background)
+        return service.intelligence.feed(category, limit, materialize=False)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -426,8 +437,11 @@ def institutional_activity(ticker: str):
 
 
 @app.get("/api/intelligence/daily-brief")
-def intelligence_daily_brief():
-    return service.intelligence.daily_brief()
+def intelligence_daily_brief(background: BackgroundTasks):
+    if os.getenv("THESISLENS_OFFLINE", "false").lower() == "true":
+        return service.intelligence.daily_brief()
+    service.intelligence.schedule(background)
+    return service.intelligence.daily_brief(materialize=False)
 
 
 @app.get("/api/intelligence/outbox")

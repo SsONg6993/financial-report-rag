@@ -62,8 +62,13 @@ const holdingSchema = z.object({
   share_type: z.string().default("SH"),
   ticker_source: z.string().default(""),
   ticker_verified: z.boolean().default(false),
-  entry_price_estimate: z
-    .object({
+  entry_price_estimate: z.preprocess(
+    (value) =>
+      value && typeof value === "object" && Object.keys(value).length === 0
+        ? undefined
+        : value,
+    z
+      .object({
       status: z.enum(["not_reliably_estimable", "indicative_range"]),
       label: z.string(),
       actual_purchase_price: z.number().nullable(),
@@ -81,8 +86,9 @@ const holdingSchema = z.object({
       method: z.string(),
       assumptions: z.array(z.string()),
       source_url: z.string(),
-    })
-    .optional(),
+      })
+      .optional(),
+  ),
 });
 export const changeSchema = z
   .object({
