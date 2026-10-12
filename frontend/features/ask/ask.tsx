@@ -4,6 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { api, answerSchema, money, percent } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { MutationError, Sources } from "@/components/research-ui";
+import { staticListKey } from "./list-key";
 import {
   ArrowUp,
   BookOpenCheck,
@@ -204,8 +205,11 @@ export function AskResearch() {
                     {(m.data.sector_sections.accumulation.length
                       ? m.data.sector_sections.accumulation
                       : ["No comparable reported share increases available."]
-                    ).map((item) => (
-                      <p className="mt-2 text-sm muted" key={item}>
+                    ).map((item, index) => (
+                      <p
+                        className="mt-2 text-sm muted"
+                        key={staticListKey("accumulation", item, index)}
+                      >
                         {item}
                       </p>
                     ))}
@@ -215,8 +219,11 @@ export function AskResearch() {
                     {(m.data.sector_sections.reductions.length
                       ? m.data.sector_sections.reductions
                       : ["No comparable reported share reductions available."]
-                    ).map((item) => (
-                      <p className="mt-2 text-sm muted" key={item}>
+                    ).map((item, index) => (
+                      <p
+                        className="mt-2 text-sm muted"
+                        key={staticListKey("reductions", item, index)}
+                      >
                         {item}
                       </p>
                     ))}
@@ -229,8 +236,11 @@ export function AskResearch() {
                   {(m.data.sector_sections.historical_changes.length
                     ? m.data.sector_sections.historical_changes
                     : ["A second comparable disclosure is not available."]
-                  ).map((item) => (
-                    <p className="text-sm muted" key={item}>
+                  ).map((item, index) => (
+                    <p
+                      className="text-sm muted"
+                      key={staticListKey("historical", item, index)}
+                    >
                       {item}
                     </p>
                   ))}
@@ -239,8 +249,11 @@ export function AskResearch() {
               <section>
                 <h3>What the Data Does Not Tell Us</h3>
                 <div className="mt-2 space-y-2">
-                  {m.data.sector_sections.limitations.map((item) => (
-                    <p className="text-sm muted" key={item}>
+                  {m.data.sector_sections.limitations.map((item, index) => (
+                    <p
+                      className="text-sm muted"
+                      key={staticListKey("limitations", item, index)}
+                    >
                       {item}
                     </p>
                   ))}
@@ -269,7 +282,7 @@ export function AskResearch() {
                       (items as string[]).map((item, index) => (
                         <p
                           className={`text-sm leading-6 whitespace-pre-line ${title === "Numbers That Matter" ? "rounded-xl border border-border p-4 font-medium" : "muted"}`}
-                          key={index}
+                          key={staticListKey(String(title), item, index)}
                         >
                           {item}
                         </p>
@@ -294,7 +307,7 @@ export function AskResearch() {
                   <div className="mt-2 space-y-2">
                     {m.data.sections.annual_context.map((item, index) => (
                       <p
-                        key={index}
+                        key={staticListKey("annual-context", item, index)}
                         className="text-sm muted whitespace-pre-line"
                       >
                         {item}
