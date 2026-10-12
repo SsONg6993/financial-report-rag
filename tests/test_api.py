@@ -219,6 +219,93 @@ def test_sector_intelligence_api_and_ask_use_saved_disclosures(client):
     assert "free cash flow" not in payload["answer"].lower()
 
 
+def test_auto_sector_overview_includes_more_than_ten_available_managers(client):
+    for institution in INSTITUTIONS[1:12]:
+        snapshot = PortfolioSnapshot(
+            institution.id,
+            "2025-06-30",
+            "2025-08-14",
+            f"https://www.sec.gov/{institution.id}-fixture",
+            f"{institution.id}-2025-06-30",
+            holdings=[
+                Holding(
+                    "APPLE INC",
+                    "COM",
+                    "037833100",
+                    100,
+                    1_000,
+                    ticker="AAPL",
+                    weight=1,
+                )
+            ],
+        )
+        main.service.store.save_snapshot(
+            "portfolio", institution.id, snapshot.reporting_period, snapshot.to_dict()
+        )
+
+    response = client.post(
+        "/api/ask",
+        json={
+            "question": "Which sectors are institutional investors buying?",
+            "mode": "auto",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "institutional_sector_analysis"
+    assert payload["sector_analysis"]["coverage"]["institution_count"] == 12
+    assert payload["sector_analysis"]["coverage"][
+        "requested_institution_count"
+    ] == len(INSTITUTIONS)
+    assert payload["sector_analysis"]["institutions"][0][
+        "reporting_period"
+    ] == "2025-06-30"
+    assert payload["sector_analysis"]["coverage"][
+        "classified_value_percentage"
+    ] == 1
+    assert "verified sector classification" in payload["answer"]
+    assert "Unknown has the largest" not in payload["answer"]
+    assert "not confirmed purchases" in " ".join(
+        payload["sector_sections"]["limitations"]
+    )
+
+
+def test_sector_explicit_comparison_limit_and_named_manager(client):
+    too_many = client.get(
+        "/api/sector-intelligence",
+        params=[("investors", item.id) for item in INSTITUTIONS[:11]],
+    )
+    assert too_many.status_code == 422
+    assert "no more than 10" in too_many.json()["detail"]
+
+    named = client.post(
+        "/api/ask",
+        json={
+            "question": "Which sectors does Warren Buffett favor?",
+            "mode": "auto",
+        },
+    )
+    assert named.status_code == 200
+    analysis = named.json()["sector_analysis"]
+    assert analysis["coverage"]["requested_institution_count"] == 1
+    assert analysis["institutions"][0]["institution_id"] == "berkshire"
+
+
+def test_sector_overview_without_saved_data_is_useful(tmp_path):
+    result = ResearchService(LocalStore(tmp_path / "empty-sector.sqlite3")).ask(
+        "Which sectors are institutional investors buying?"
+    )
+    assert result["intent"] == "institutional_sector_analysis"
+    assert result["sector_analysis"]["coverage"]["institution_count"] == 0
+    assert result["sector_analysis"]["coverage"][
+        "requested_institution_count"
+    ] == len(INSTITUTIONS)
+    assert set(result["sector_analysis"]["unavailable_institutions"]) == {
+        institution.id for institution in INSTITUTIONS
+    }
+    assert "No saved institutional disclosure" in result["answer"]
+
+
 def test_track_edit_evaluate_history(client):
     suggestions = client.get("/api/company/AAPL/suggested-theses").json()
     assert len(suggestions) == 4
