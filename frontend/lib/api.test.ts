@@ -72,10 +72,15 @@ it("distinguishes backend network failure from an HTTP response", async () => {
 it("identifies an API HTTP 500", async () => {
   vi.stubGlobal(
     "fetch",
-    vi.fn().mockResolvedValue(new Response("", { status: 500 })),
+    vi.fn().mockResolvedValue(
+      new Response("", {
+        status: 500,
+        headers: { "X-Request-ID": "request-123" },
+      }),
+    ),
   );
   await expect(api("/market-pulse", z.unknown())).rejects.toThrow(
-    "HTTP 500 for /api/market-pulse",
+    "HTTP 500 for /api/market-pulse. The backend is running but this request failed. Reference: request-123.",
   );
 });
 

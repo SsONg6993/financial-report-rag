@@ -354,7 +354,8 @@ def test_watch_follow_and_sourced_ask(client):
     assert no_motive["sections"]["numbers"]
 
 
-def test_general_ask_never_falls_through_to_aapl(client, monkeypatch):
+@pytest.mark.parametrize("mode", ["auto", "general"])
+def test_general_ask_never_falls_through_to_aapl(client, monkeypatch, mode):
     monkeypatch.setattr(
         "backend.service.generate_general_answer",
         lambda *args, **kwargs: GenerationResult(
@@ -366,7 +367,7 @@ def test_general_ask_never_falls_through_to_aapl(client, monkeypatch):
         "/api/ask",
         json={
             "question": "How do you think medical AI will develop in the future?",
-            "mode": "auto",
+            "mode": mode,
         },
     ).json()
     assert answer["intent"] == "general"
@@ -388,6 +389,34 @@ def test_general_configuration_failure_is_explicit(client, monkeypatch):
     ).json()
     assert answer["configuration_error"] == "General AI is not configured."
     assert answer["source"] == "General AI configuration"
+
+
+@pytest.mark.parametrize("mode", ["auto", "general"])
+def test_general_transient_provider_error_is_controlled_and_logged(
+    client, monkeypatch, caplog, mode
+):
+    private_question = "How do you think medical AI will develop in the future?"
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("synthetic transient provider failure")
+
+    monkeypatch.setattr("backend.service.generate_general_answer", fail)
+    with caplog.at_level("INFO", logger="thesislens.ask"):
+        response = client.post(
+            "/api/ask", json={"question": private_question, "mode": mode}
+        )
+
+    assert response.status_code == 200
+    answer = response.json()
+    assert answer["intent"] == "general"
+    assert answer["configuration_error_code"] == "ollama_temporary_error"
+    assert answer["evidence"] == []
+    assert answer["request_id"] == response.headers["X-Request-ID"]
+    assert "request_id=" in caplog.text
+    assert "routed_intent=general" in caplog.text
+    assert "duration_ms=" in caplog.text
+    assert "exception_type=RuntimeError" in caplog.text
+    assert private_question not in caplog.text
 
 
 def test_unknown_financial_ticker_does_not_substitute_aapl(client):
