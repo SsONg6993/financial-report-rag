@@ -82,3 +82,15 @@ def test_status_command_does_not_print_environment_secrets():
     assert "TELEGRAM" not in source
     assert "TYPESAFE_API_KEY" not in source
     assert "Get-ChildItem Env:" not in source
+
+
+def test_browser_url_uses_localhost_after_a_dedicated_readiness_check():
+    source = MODULE.read_text(encoding="utf-8")
+    assert '$script:FrontendProbeUrl = "http://127.0.0.1:3000"' in source
+    assert '$script:FrontendBrowserUrl = "http://localhost:3000"' in source
+    readiness = source.index(
+        "Wait-ForHttpEndpoint $script:FrontendBrowserUrl 15"
+    )
+    browser_open = source.index("Start-Process $script:FrontendBrowserUrl")
+    assert readiness < browser_open
+    assert 'Write-Host "  Frontend: $script:FrontendBrowserUrl"' in source
