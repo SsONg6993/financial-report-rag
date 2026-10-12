@@ -446,26 +446,31 @@ class ResearchService:
         sector: str | None = None,
     ) -> dict:
         requested = list(dict.fromkeys(institution_ids or []))
-        if requested:
-            missing = [key for key in requested if self.registry.get(key) is None]
+        explicit_selection = bool(requested)
+        registry = {institution.id: institution for institution in self.registry.all()}
+        if explicit_selection:
+            missing = [key for key in requested if key not in registry]
             if missing:
                 raise ValueError("Unknown institution: " + ", ".join(missing))
         else:
-            requested = [
-                institution.id
-                for institution in self.registry.all()
-                if self.portfolios(institution.id)
-            ]
-        if len(requested) > 10:
+            # An omitted selection means a complete tracked-manager overview.
+            # Keep managers without saved data visible in coverage rather than
+            # silently dropping them from the requested population.
+            requested = list(registry)
+        if explicit_selection and len(requested) > 10:
             raise ValueError("Select no more than 10 institutions.")
+        snapshots_by_id = {
+            key: self.portfolios(key)
+            for key in requested
+        }
         institutions = []
         unavailable = []
         for key in requested:
-            snapshots = self.portfolios(key)
+            snapshots = snapshots_by_id[key]
             if not snapshots:
                 unavailable.append(key)
                 continue
-            institution = self.registry.get(key)
+            institution = registry.get(key)
             try:
                 analysis = analyze_sector_exposure(
                     snapshots,
@@ -591,22 +596,26 @@ class ResearchService:
         selected = self._institution_ids_in_question(question)
         data = self.sector_intelligence(selected or None)
         aggregate = data["aggregate"]
+        classified = [row for row in aggregate if row["sector"] != "Unknown"]
         count = data["coverage"]["institution_count"]
         if not count:
             short = (
                 "No saved institutional disclosure is available for sector analysis. "
                 "A verified dated portfolio snapshot is required."
             )
-        elif aggregate:
-            leader = aggregate[0]
+        elif classified:
+            leader = classified[0]
             scope = (
                 data["institutions"][0]["name"]
                 if len(data["institutions"]) == 1
                 else f"{count} institutions with saved disclosures"
             )
+            coverage = data["coverage"]["classified_value_percentage"]
             short = (
-                f"In the latest comparable saved data for {scope}, "
+                f"Among the {coverage:.1%} of reported value with verified sector "
+                f"classification in the latest comparable saved data for {scope}, "
                 f"{leader['sector']} has the largest combined reported value. "
+                "Unknown classifications remain included in the coverage table. "
                 "This is historical allocation evidence, not a prediction of the next purchase."
             )
         else:
@@ -634,7 +643,7 @@ class ResearchService:
         limitations = [
             "13F data is delayed and incomplete; it omits many asset classes, short positions, and some hedges.",
             "A sector-weight change can reflect security-price movement as well as position changes.",
-            "Reported share changes do not identify transaction dates, prices, rationale, or future intent.",
+            "Reported share-count increases are not confirmed purchases; disclosures do not identify transaction dates, prices, rationale, or future intent.",
             "Unknown classifications remain in coverage and are not silently removed.",
         ]
         evidence = [
