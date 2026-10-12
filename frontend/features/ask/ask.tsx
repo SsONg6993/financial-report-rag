@@ -28,6 +28,10 @@ const generalErrorTitle = (code?: string | null) => {
   if (code === "ollama_model_missing") return "Ollama model is missing";
   if (code === "ollama_timeout") return "Ollama response timed out";
   if (code === "ollama_loading") return "Ollama model is loading";
+  if (code === "ollama_invalid_response")
+    return "Ollama returned an invalid response";
+  if (code === "ollama_temporary_error")
+    return "Local AI request failed temporarily";
   if (code === "remote_llm_disabled") return "Remote LLM access is disabled";
   return "General AI configuration error";
 };
@@ -311,6 +315,9 @@ export function AskResearch() {
                 {generalErrorTitle(m.data.configuration_error_code)}
               </strong>
               <p className="mt-2 text-sm">{m.data.configuration_error}</p>
+              {m.data.request_id && (
+                <p className="source">Reference: {m.data.request_id}</p>
+              )}
             </div>
           )}
           {m.data.evidence.length > 0 && (
