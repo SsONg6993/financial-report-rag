@@ -225,6 +225,7 @@ def _position_changes(
                 "cusip": holding.cusip,
                 "security_class": holding.security_class,
                 "put_call": holding.put_call,
+                "share_type": holding.share_type,
                 "activity": activity,
                 "shares_before": raw_before,
                 "comparable_shares_before": adjusted_before,

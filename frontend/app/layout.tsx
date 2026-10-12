@@ -12,8 +12,14 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const buildCommit =
+    process.env.NEXT_PUBLIC_THESISLENS_BUILD_COMMIT ?? "unknown";
   return (
-    <html lang="en" data-scroll-behavior="smooth">
+    <html
+      lang="en"
+      data-scroll-behavior="smooth"
+      data-thesislens-build={buildCommit}
+    >
       <body>
         <a
           href="#main"
