@@ -625,9 +625,22 @@ class ResearchService:
         historical = []
         for analysis in data["institutions"]:
             for change in analysis["position_changes"]:
+                security_details = (
+                    [change["security_class"]] if change["security_class"] else []
+                )
+                if change["put_call"]:
+                    security_details.append(change["put_call"])
+                if change["share_type"] and change["share_type"] != "SH":
+                    security_details.append(change["share_type"])
+                security_label = (
+                    f" ({' · '.join(security_details)})"
+                    if any(security_details)
+                    else ""
+                )
                 label = (
                     f"{analysis['name']} · {change['sector']} · "
-                    f"{change['ticker'] or change['issuer']}: {change['activity'].lower()} "
+                    f"{change['ticker'] or change['issuer']}{security_label}: "
+                    f"{change['activity'].lower()} "
                     f"reported shares ({analysis['previous_period']} to "
                     f"{analysis['reporting_period']})."
                 )

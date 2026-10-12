@@ -241,6 +241,35 @@ test("Ask routes sector questions away from company financial statements", async
   await expect(answer.getByText(/Source Citations/)).toBeVisible();
 });
 
+test("Ask renders duplicate sector descriptions without React key warnings", async ({
+  page,
+}) => {
+  const duplicate =
+    "Berkshire Hathaway · Unknown · LENNAR CORP: increased reported shares (2026-03-31 to 2026-06-30).";
+  const keyWarnings: string[] = [];
+  page.on("console", (message) => {
+    if (/same key|unique key/i.test(message.text()))
+      keyWarnings.push(message.text());
+  });
+  await page.route("**/api/ask", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.sector_sections.accumulation = [duplicate, duplicate];
+    await route.fulfill({ response, json: body });
+  });
+
+  await page.goto("/ask");
+  await page
+    .getByLabel("What would you like to investigate?")
+    .fill("Which sectors are institutional investors buying?");
+  await page
+    .getByRole("button", { name: "Ask ThesisLens", exact: true })
+    .click();
+
+  await expect(page.getByText(duplicate, { exact: true })).toHaveCount(2);
+  expect(keyWarnings).toEqual([]);
+});
+
 test("Ask quarterly numbers and annual context stay separate", async ({
   page,
 }) => {

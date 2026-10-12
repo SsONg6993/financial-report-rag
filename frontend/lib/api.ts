@@ -278,6 +278,7 @@ const sectorInstitutionSchema = z.object({
       cusip: z.string(),
       security_class: z.string(),
       put_call: z.string(),
+      share_type: z.string().default("SH"),
       activity: z.string(),
       shares_before: z.number(),
       comparable_shares_before: z.number(),
