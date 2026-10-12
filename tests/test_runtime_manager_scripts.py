@@ -94,3 +94,43 @@ def test_browser_url_uses_localhost_after_a_dedicated_readiness_check():
     browser_open = source.index("Start-Process $script:FrontendBrowserUrl")
     assert readiness < browser_open
     assert 'Write-Host "  Frontend: $script:FrontendBrowserUrl"' in source
+
+
+def test_frontend_listener_decisions_are_safe_and_version_aware():
+    script = f"""
+Import-Module '{MODULE}' -Force
+$module = Get-Module ThesisLens.Runtime
+$result = & $module {{
+  @(
+    Get-FrontendListenerDecision $null $null 'new' $false
+    Get-FrontendListenerDecision 100 'new' 'new' $false
+    Get-FrontendListenerDecision 100 'old' 'new' $true
+    Get-FrontendListenerDecision 100 'old' 'new' $false
+    Get-FrontendListenerDecision 100 $null 'new' $false
+  )
+}}
+$result | ConvertTo-Json -Compress
+"""
+    result = powershell(script)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert json.loads(result.stdout.strip()) == [
+        "start",
+        "reuse",
+        "replace",
+        "refuse",
+        "refuse",
+    ]
+
+
+def test_frontend_embeds_build_marker_for_runtime_verification():
+    layout = (ROOT / "frontend" / "app" / "layout.tsx").read_text(encoding="utf-8")
+    assert "NEXT_PUBLIC_THESISLENS_BUILD_COMMIT" in layout
+    assert "data-thesislens-build={buildCommit}" in layout
+    source = MODULE.read_text(encoding="utf-8")
+    assert "Get-FrontendBuildCommit" in source
+    assert "Get-FrontendListenerDecision" in source
+
+
+def test_managed_frontend_binds_only_to_ipv4_loopback():
+    source = MODULE.read_text(encoding="utf-8")
+    assert '"--hostname", "127.0.0.1", "--port", "3000"' in source
