@@ -262,16 +262,18 @@ export function SearchBox() {
   );
 }
 export function Section({
+  id,
   title,
   aside,
   children,
 }: {
+  id?: string;
   title: string;
   aside?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
-    <section>
+    <section id={id} className="scroll-mt-24">
       <div className="section-head">
         <h2>{title}</h2>
         {aside}
@@ -284,7 +286,10 @@ export function Sources({ evidence }: { evidence: Evidence[] }) {
   return (
     <div className="space-y-2">
       {evidence.map((e, i) => (
-        <div className="source" key={i}>
+        <div
+          className="source"
+          key={`${e.source_url}:${e.period}:${e.source_type}:${i}`}
+        >
           <p className="line-clamp-4">{e.text}</p>
           <span>
             {e.period} {e.source_type}{" "}

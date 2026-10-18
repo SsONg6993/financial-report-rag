@@ -31,6 +31,7 @@ import {
   ResearchLink,
   Section,
 } from "@/components/research-ui";
+import { SectorIntelligence } from "./sector-intelligence";
 
 function Follow({ investor }: { investor: Investor }) {
   const cache = useQueryClient();
@@ -41,6 +42,7 @@ function Follow({ investor }: { investor: Investor }) {
       }),
     onSuccess: () => {
       cache.invalidateQueries({ queryKey: ["investors"] });
+      cache.invalidateQueries({ queryKey: ["investor-summaries"] });
       cache.invalidateQueries({ queryKey: ["investor", investor.id] });
       cache.invalidateQueries({ queryKey: ["home"] });
     },
@@ -77,9 +79,10 @@ export function InvestorList() {
     },
   });
   const q = useQuery({
-    queryKey: ["investors"],
+    queryKey: ["investor-summaries"],
     queryFn: ({ signal }) =>
-      api("/investors", z.array(investorSchema), { signal }),
+      api("/investors/summaries", z.array(investorSchema), { signal }),
+    staleTime: 10 * 60_000,
   });
   if (q.isPending) return <Loading />;
   if (q.isError) return <ErrorState retry={() => q.refetch()} />;
@@ -269,7 +272,7 @@ export function InvestorProfile({ id }: { id: string }) {
     queryKey: ["investor", id],
     queryFn: ({ signal }) =>
       api("/investors/" + id, investorSchema, { signal }),
-    refetchInterval: 60_000,
+    staleTime: 5 * 60_000,
   });
   if (q.isPending) return <Loading />;
   if (q.isError) return <ErrorState retry={() => q.refetch()} />;
@@ -540,6 +543,7 @@ export function InvestorProfile({ id }: { id: string }) {
           <AllocationChart investor={i} />
         </Section>
       )}
+      {i.holdings.length > 0 && <SectorIntelligence investorId={i.id} />}
       <Section title="Companies Worth Exploring">
         <p className="muted text-sm mb-4">
           Start with a large disclosed position, then verify the business for

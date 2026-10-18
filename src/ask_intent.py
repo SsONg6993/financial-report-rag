@@ -17,6 +17,7 @@ class AskIntent(StrEnum):
     GENERAL = "general"
     FINANCIAL_RESEARCH = "financial_research"
     PORTFOLIO_ANALYSIS = "portfolio_analysis"
+    INSTITUTIONAL_SECTOR_ANALYSIS = "institutional_sector_analysis"
     CURRENT_PUBLIC_INFORMATION = "current_public_information"
     UNSUPPORTED = "unsupported"
 
@@ -89,6 +90,15 @@ def route_ask(
             "The request requires account access or transaction execution.",
         )
 
+    institutional_sector = bool(
+        re.search(r"\b(sector|sectors|industry|industries)\b", query)
+        and re.search(
+            r"\b(institutional|institution|investor|investors|capital|exposure|"
+            r"portfolio|holdings|buying|invest|buffett|berkshire|ackman|arkk?|"
+            r"cathie wood|burry|tepper|druckenmiller)\b",
+            query,
+        )
+    )
     portfolio = bool(
         re.search(
             r"\b(13f|institutional|portfolio|holding|holdings|disclos|"
@@ -114,6 +124,12 @@ def route_ask(
         )
     )
 
+    if institutional_sector:
+        return AskRoute(
+            AskIntent.INSTITUTIONAL_SECTOR_ANALYSIS,
+            None,
+            "Institutional sector-allocation language detected.",
+        )
     if portfolio:
         return AskRoute(
             AskIntent.PORTFOLIO_ANALYSIS,

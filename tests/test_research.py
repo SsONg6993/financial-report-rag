@@ -204,6 +204,23 @@ def test_general_llm_reports_missing_local_model(monkeypatch):
     assert result.error_code == "ollama_model_missing"
 
 
+def test_general_llm_rejects_malformed_model_list_without_raising(monkeypatch):
+    class Tags:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return []
+
+    monkeypatch.setattr("src.llm.requests.get", lambda *_args, **_kwargs: Tags())
+
+    result = generate_general_answer("Explain medical AI", "qwen3:4b")
+
+    assert not result.available
+    assert result.error_code == "ollama_invalid_response"
+    assert result.exception_type == "TypeError"
+
+
 def test_general_llm_reports_model_loading_without_restarting(monkeypatch):
     response = requests.Response()
     response.status_code = 503
@@ -244,6 +261,56 @@ def test_general_llm_inference_timeout_is_not_retried_or_restarted(monkeypatch):
     assert calls == 1
 
 
+def test_general_llm_rejects_null_response_without_raising(monkeypatch):
+    class Tags:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"models": [{"name": "qwen3:4b"}]}
+
+    class InvalidGeneration:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"response": None}
+
+    monkeypatch.setattr("src.llm.requests.get", lambda *_args, **_kwargs: Tags())
+    monkeypatch.setattr(
+        "src.llm.requests.post", lambda *_args, **_kwargs: InvalidGeneration()
+    )
+
+    result = generate_general_answer("Explain medical AI", "qwen3:4b")
+
+    assert not result.available
+    assert result.error_code == "ollama_invalid_response"
+    assert result.exception_type == "InvalidResponse"
+
+
+def test_general_llm_reports_temporary_inference_transport_error(monkeypatch):
+    class Tags:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"models": [{"name": "qwen3:4b"}]}
+
+    monkeypatch.setattr("src.llm.requests.get", lambda *_args, **_kwargs: Tags())
+    monkeypatch.setattr(
+        "src.llm.requests.post",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            requests.exceptions.ChunkedEncodingError("truncated local response")
+        ),
+    )
+
+    result = generate_general_answer("Explain medical AI", "qwen3:4b")
+
+    assert not result.available
+    assert result.error_code == "ollama_temporary_error"
+    assert result.exception_type == "ChunkedEncodingError"
+
+
 def test_general_llm_uses_only_question_with_installed_model(monkeypatch):
     class Response:
         def raise_for_status(self):
@@ -255,11 +322,20 @@ def test_general_llm_uses_only_question_with_installed_model(monkeypatch):
                 "response": "Medical AI will depend on clinical validation.",
             }
 
+    payload = {}
+
+    def generate(*_args, **kwargs):
+        payload.update(kwargs["json"])
+        return Response()
+
     monkeypatch.setattr("src.llm.requests.get", lambda *_args, **_kwargs: Response())
-    monkeypatch.setattr("src.llm.requests.post", lambda *_args, **_kwargs: Response())
+    monkeypatch.setattr("src.llm.requests.post", generate)
     result = generate_general_answer(
         "How will medical AI develop in the future?", "qwen3:4b"
     )
     assert result.available
     assert "Medical AI" in result.answer
     assert "AAPL" not in result.answer
+    assert payload["keep_alive"] == "30s"
+    assert "directly and concisely" in payload["prompt"]
+    assert "Do not add citations" in payload["prompt"]

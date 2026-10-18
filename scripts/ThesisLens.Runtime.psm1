@@ -1,5 +1,8 @@
 Set-StrictMode -Version Latest
 
+$script:FrontendProbeUrl = "http://127.0.0.1:3000"
+$script:FrontendBrowserUrl = "http://localhost:3000"
+
 function Get-ThesisLensRoot {
     return (Split-Path -Parent $PSScriptRoot)
 }
@@ -237,6 +240,40 @@ function Wait-ForJson(
     return $null
 }
 
+function Wait-ForHttpEndpoint([string]$Uri, [int]$Seconds = 15) {
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    do {
+        try {
+            $response = Invoke-WebRequest -Uri $Uri -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
+            if ($response.StatusCode -eq 200) { return $true }
+        } catch { }
+        Start-Sleep -Milliseconds 500
+    } while ((Get-Date) -lt $deadline)
+    return $false
+}
+
+function Get-FrontendBuildCommit([string]$Uri = $script:FrontendProbeUrl) {
+    try {
+        $page = Invoke-WebRequest -Uri $Uri -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
+        if ($page.StatusCode -eq 200 -and $page.Content -match 'data-thesislens-build="([0-9a-f]{40}|unknown)"') {
+            return $Matches[1]
+        }
+    } catch { }
+    return $null
+}
+
+function Get-FrontendListenerDecision(
+    [object]$Listener,
+    [string]$FrontendCommit,
+    [string]$Commit,
+    [bool]$StateOwned
+) {
+    if (-not $Listener) { return "start" }
+    if ($FrontendCommit -eq $Commit) { return "reuse" }
+    if ($StateOwned) { return "replace" }
+    return "refuse"
+}
+
 function Get-BackendListenerDecision(
     [object]$Listener,
     [object]$Health,
@@ -382,15 +419,19 @@ function Start-Frontend([hashtable]$State, [string]$Commit) {
         throw "Frontend dependencies are missing. Run npm ci in the frontend folder."
     }
     $listener = Get-PortOwner 3000
-    if ($listener) {
-        try {
-            $page = Invoke-WebRequest -Uri "http://127.0.0.1:3000" -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
-            if ($page.Content -match "ThesisLens") {
-                Write-RuntimeLog "INFO" "Reused existing ThesisLens Frontend on port 3000."
-                return
-            }
-        } catch { }
-        throw "Port 3000 is occupied by an unrelated or unverifiable process (PID $listener). Nothing was terminated."
+    $frontendCommit = Get-FrontendBuildCommit
+    $stateOwned = $State.ContainsKey("frontend") -and (Test-StateProcess $State.frontend "frontend")
+    $decision = Get-FrontendListenerDecision $listener $frontendCommit $Commit $stateOwned
+    if ($decision -eq "reuse") {
+        Write-RuntimeLog "INFO" "Reused matching ThesisLens Frontend on port 3000."
+        return
+    }
+    if ($decision -eq "replace") {
+        Write-RuntimeLog "INFO" "Replacing verified stale Frontend on port 3000."
+        [void](Stop-TrackedComponent $State "frontend")
+    }
+    if ($decision -eq "refuse") {
+        throw "Port 3000 is occupied by an unrelated, older, or unverifiable process (PID $listener). Ownership could not be verified, so nothing was terminated."
     }
     $paths = Initialize-RuntimeDirectory
     Rotate-RuntimeLog (Join-Path $paths.Logs "frontend-stdout.log")
@@ -398,7 +439,9 @@ function Start-Frontend([hashtable]$State, [string]$Commit) {
     $previousCommit = $env:NEXT_PUBLIC_THESISLENS_BUILD_COMMIT
     try {
         $env:NEXT_PUBLIC_THESISLENS_BUILD_COMMIT = $Commit
-        $process = Start-Process -FilePath $npm.Source -ArgumentList @("--prefix", $frontend, "run", "dev") `
+        $process = Start-Process -FilePath $npm.Source -ArgumentList @(
+            "--prefix", $frontend, "run", "dev", "--", "--hostname", "127.0.0.1", "--port", "3000"
+        ) `
           -WorkingDirectory $frontend -WindowStyle Hidden -PassThru `
           -RedirectStandardOutput (Join-Path $paths.Logs "frontend-stdout.log") `
           -RedirectStandardError (Join-Path $paths.Logs "frontend-stderr.log")
@@ -416,7 +459,7 @@ function Start-Frontend([hashtable]$State, [string]$Commit) {
     $deadline = (Get-Date).AddSeconds(60)
     do {
         try {
-            $response = Invoke-WebRequest -Uri "http://127.0.0.1:3000" -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
+            $response = Invoke-WebRequest -Uri $script:FrontendProbeUrl -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
             if ($response.StatusCode -eq 200) { $ready = $true; break }
         } catch { }
         Start-Sleep -Milliseconds 750
@@ -436,11 +479,7 @@ function Get-ThesisLensStatus {
     $state = Read-RuntimeState
     $health = Invoke-LocalJson "http://127.0.0.1:8000/api/health"
     $readiness = Invoke-LocalJson "http://127.0.0.1:8000/api/readiness" 15
-    $frontendReady = $false
-    try {
-        $frontendResponse = Invoke-WebRequest -Uri "http://127.0.0.1:3000" -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
-        $frontendReady = $frontendResponse.StatusCode -eq 200
-    } catch { }
+    $frontendBuild = Get-FrontendBuildCommit
     $commit = Get-CurrentCommit
     $backendStatus = "offline"
     if ($health) {
@@ -453,7 +492,8 @@ function Get-ThesisLensStatus {
         backend_build = if ($health -and $health.build_commit) { $health.build_commit } else { $null }
         expected_build = $commit
         backend_pid = Get-PortOwner 8000
-        frontend = if ($frontendReady) { "ready" } else { "unavailable" }
+        frontend = if (-not $frontendBuild) { "unavailable" } elseif ($frontendBuild -eq $commit) { "ready" } else { "version_mismatch" }
+        frontend_build = $frontendBuild
         frontend_pid = Get-PortOwner 3000
         market_pulse = if ($readiness) { $readiness.market_pulse.status } else { "backend_unavailable" }
         general_ai = if ($readiness) { $readiness.ollama.status } else { "backend_unavailable" }
@@ -473,13 +513,16 @@ function Start-ThesisLens([switch]$NoBrowser) {
     Start-Frontend $state $commit
     $readiness = Wait-ForJson "http://127.0.0.1:8000/api/readiness" 30 15
     if (-not $readiness) { throw "Backend liveness succeeded but readiness could not be read." }
+    if (-not (Wait-ForHttpEndpoint $script:FrontendBrowserUrl 15)) {
+        throw "Frontend is listening on port 3000 but is not reachable at $script:FrontendBrowserUrl. The browser was not opened."
+    }
     Write-RuntimeState $state
     Write-Host "ThesisLens is ready." -ForegroundColor Green
     Write-Host "  Backend: $($health.build_commit.Substring(0, [math]::Min(12, $health.build_commit.Length)))"
     Write-Host "  Market Pulse: $($readiness.market_pulse.status)"
     Write-Host "  General AI: $($ollama.status) ($($ollama.model))"
-    Write-Host "  Frontend: http://127.0.0.1:3000"
-    if (-not $NoBrowser) { Start-Process "http://127.0.0.1:3000" }
+    Write-Host "  Frontend: $script:FrontendBrowserUrl"
+    if (-not $NoBrowser) { Start-Process $script:FrontendBrowserUrl }
 }
 
 function Stop-ThesisLens {
