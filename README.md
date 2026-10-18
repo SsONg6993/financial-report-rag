@@ -22,7 +22,7 @@ After installing the Python and frontend dependencies once, start the complete l
 .\start-thesislens.ps1
 ```
 
-The manager verifies the project `.venv`, detects port conflicts, reuses only a matching healthy Backend, starts installed local Ollama when needed, checks the configured model without downloading it, starts one Frontend, waits for readiness, and opens `http://127.0.0.1:3000`. Use `-NoBrowser` for terminal-only startup. It records only process IDs, start times, a random instance identifier, and build metadata under ignored `.runtime/`; rotating logs are capped there as well.
+The manager verifies the project `.venv`, detects port conflicts, reuses only a matching healthy Backend, starts installed local Ollama when needed, checks the configured model without downloading it, starts one Frontend, waits for readiness, verifies `http://localhost:3000`, and opens that address. Internal process and health probes continue to use IPv4 loopback. Use `-NoBrowser` for terminal-only startup. It records only process IDs, start times, a random instance identifier, and build metadata under ignored `.runtime/`; rotating logs are capped there as well.
 
 ```powershell
 .\status-thesislens.ps1       # safe dependency summary; never prints secrets

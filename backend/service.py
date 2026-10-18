@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import threading
+import time
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,7 +24,7 @@ from backend.research_context import (
 from backend.suggestions import CATEGORIES, suggested_theses
 from backend.tickers import enrich_cached_classes
 from src.ask import answer_question
-from src.ask_intent import AskIntent, route_ask
+from src.ask_intent import AskIntent, AskRoute, route_ask
 from src.company_directory import CompanyDirectory
 from src.config import AppConfig
 from src.decision import JevDecisionProvider
@@ -625,9 +626,22 @@ class ResearchService:
         historical = []
         for analysis in data["institutions"]:
             for change in analysis["position_changes"]:
+                security_details = (
+                    [change["security_class"]] if change["security_class"] else []
+                )
+                if change["put_call"]:
+                    security_details.append(change["put_call"])
+                if change["share_type"] and change["share_type"] != "SH":
+                    security_details.append(change["share_type"])
+                security_label = (
+                    f" ({' · '.join(security_details)})"
+                    if any(security_details)
+                    else ""
+                )
                 label = (
                     f"{analysis['name']} · {change['sector']} · "
-                    f"{change['ticker'] or change['issuer']}: {change['activity'].lower()} "
+                    f"{change['ticker'] or change['issuer']}{security_label}: "
+                    f"{change['activity'].lower()} "
                     f"reported shares ({analysis['previous_period']} to "
                     f"{analysis['reporting_period']})."
                 )
@@ -1128,8 +1142,11 @@ class ResearchService:
         question: str,
         ticker: str | None = None,
         mode: str = "auto",
+        *,
+        route: AskRoute | None = None,
+        request_id: str = "unavailable",
     ) -> dict:
-        route = route_ask(question, mode, ticker)
+        route = route or route_ask(question, mode, ticker)
         metadata = {
             "intent": route.intent.value,
             "mode": mode,
@@ -1138,16 +1155,46 @@ class ResearchService:
             "privacy": "No private workspace data was sent to an external model.",
         }
         if route.intent is AskIntent.GENERAL:
-            result = generate_general_answer(
-                question,
-                self.config.ollama_model,
-                self.config.ollama_base_url,
-                self.config.allow_remote_llm,
-                self.config.ollama_readiness_timeout,
-                self.config.ollama_inference_timeout,
-                self.config.ollama_readiness_retries,
-            )
+            started = time.perf_counter()
+            try:
+                result = generate_general_answer(
+                    question,
+                    self.config.ollama_model,
+                    self.config.ollama_base_url,
+                    self.config.allow_remote_llm,
+                    self.config.ollama_readiness_timeout,
+                    self.config.ollama_inference_timeout,
+                    self.config.ollama_readiness_retries,
+                )
+            except Exception as exc:  # noqa: BLE001 - isolate the local model boundary.
+                logging.getLogger("thesislens.ask").error(
+                    "general_ai_provider_failed request_id=%s routed_intent=%s "
+                    "duration_ms=%.1f exception_type=%s",
+                    request_id,
+                    route.intent.value,
+                    (time.perf_counter() - started) * 1000,
+                    type(exc).__name__,
+                )
+                return {
+                    **metadata,
+                    "answer": "The local Ollama request failed temporarily. Retry in a moment.",
+                    "evidence": [],
+                    "source": "Local General AI runtime",
+                    "configuration_error": (
+                        "The local Ollama request failed temporarily. Retry in a moment."
+                    ),
+                    "configuration_error_code": "ollama_temporary_error",
+                }
             if not result.available:
+                logging.getLogger("thesislens.ask").warning(
+                    "general_ai_unavailable request_id=%s routed_intent=%s "
+                    "duration_ms=%.1f exception_type=%s error_code=%s",
+                    request_id,
+                    route.intent.value,
+                    (time.perf_counter() - started) * 1000,
+                    result.exception_type or "ControlledFailure",
+                    result.error_code or "ollama_unavailable",
+                )
                 return {
                     **metadata,
                     "answer": result.error or "General AI is unavailable.",

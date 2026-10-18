@@ -291,6 +291,44 @@ def test_sector_explicit_comparison_limit_and_named_manager(client):
     assert analysis["institutions"][0]["institution_id"] == "berkshire"
 
 
+def test_sector_answer_preserves_same_issuer_security_classes(client):
+    for period, class_a, class_b in (
+        ("2026-03-31", 100, 20),
+        ("2026-06-30", 125, 30),
+    ):
+        snapshot = PortfolioSnapshot(
+            "berkshire",
+            period,
+            "2026-08-14",
+            "https://www.sec.gov/berkshire-fixture",
+            f"berkshire-{period}",
+            holdings=[
+                Holding("LENNAR CORP", "CL A", "526057104", class_a, 1_000),
+                Holding("LENNAR CORP", "CL B", "526057302", class_b, 200),
+            ],
+        )
+        main.service.store.save_snapshot(
+            "portfolio", "berkshire", period, snapshot.to_dict()
+        )
+
+    payload = client.post(
+        "/api/ask",
+        json={
+            "question": "Which sectors does Warren Buffett favor?",
+            "mode": "auto",
+        },
+    ).json()
+    changes = payload["sector_analysis"]["institutions"][0]["position_changes"]
+    assert {change["cusip"] for change in changes} == {"526057104", "526057302"}
+    assert {change["security_class"] for change in changes} == {"CL A", "CL B"}
+    assert {change["share_type"] for change in changes} == {"SH"}
+    descriptions = payload["sector_sections"]["accumulation"]
+    assert len(descriptions) == 2
+    assert len(set(descriptions)) == 2
+    assert any("LENNAR CORP (CL A)" in item for item in descriptions)
+    assert any("LENNAR CORP (CL B)" in item for item in descriptions)
+
+
 def test_sector_overview_without_saved_data_is_useful(tmp_path):
     result = ResearchService(LocalStore(tmp_path / "empty-sector.sqlite3")).ask(
         "Which sectors are institutional investors buying?"
@@ -354,7 +392,8 @@ def test_watch_follow_and_sourced_ask(client):
     assert no_motive["sections"]["numbers"]
 
 
-def test_general_ask_never_falls_through_to_aapl(client, monkeypatch):
+@pytest.mark.parametrize("mode", ["auto", "general"])
+def test_general_ask_never_falls_through_to_aapl(client, monkeypatch, mode):
     monkeypatch.setattr(
         "backend.service.generate_general_answer",
         lambda *args, **kwargs: GenerationResult(
@@ -366,7 +405,7 @@ def test_general_ask_never_falls_through_to_aapl(client, monkeypatch):
         "/api/ask",
         json={
             "question": "How do you think medical AI will develop in the future?",
-            "mode": "auto",
+            "mode": mode,
         },
     ).json()
     assert answer["intent"] == "general"
@@ -388,6 +427,34 @@ def test_general_configuration_failure_is_explicit(client, monkeypatch):
     ).json()
     assert answer["configuration_error"] == "General AI is not configured."
     assert answer["source"] == "General AI configuration"
+
+
+@pytest.mark.parametrize("mode", ["auto", "general"])
+def test_general_transient_provider_error_is_controlled_and_logged(
+    client, monkeypatch, caplog, mode
+):
+    private_question = "How do you think medical AI will develop in the future?"
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("synthetic transient provider failure")
+
+    monkeypatch.setattr("backend.service.generate_general_answer", fail)
+    with caplog.at_level("INFO", logger="thesislens.ask"):
+        response = client.post(
+            "/api/ask", json={"question": private_question, "mode": mode}
+        )
+
+    assert response.status_code == 200
+    answer = response.json()
+    assert answer["intent"] == "general"
+    assert answer["configuration_error_code"] == "ollama_temporary_error"
+    assert answer["evidence"] == []
+    assert answer["request_id"] == response.headers["X-Request-ID"]
+    assert "request_id=" in caplog.text
+    assert "routed_intent=general" in caplog.text
+    assert "duration_ms=" in caplog.text
+    assert "exception_type=RuntimeError" in caplog.text
+    assert private_question not in caplog.text
 
 
 def test_unknown_financial_ticker_does_not_substitute_aapl(client):
