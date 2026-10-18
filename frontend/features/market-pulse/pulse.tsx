@@ -101,8 +101,8 @@ export function MarketPulsePreview() {
       }
     >
       {q.isError ? (
-        <p className="empty">
-          Market Pulse is unavailable. Your other research is unaffected.
+        <p className="empty" role="alert">
+          {q.error.message}
         </p>
       ) : (
         <>
@@ -119,8 +119,9 @@ export function MarketPulsePreview() {
           </div>
           {!q.data.events.some((e) => e.recent) && (
             <p className="empty">
-              No recent sourced events cached yet. Older coverage is not
-              presented as latest.
+              {q.data.status === "source_unavailable"
+                ? "Market Pulse sources are unavailable and no successful cached events exist."
+                : "No recent sourced events cached yet. Older coverage is not presented as latest."}
             </p>
           )}
         </>
@@ -141,7 +142,8 @@ export function MarketPulsePage() {
     onSuccess: () => cache.invalidateQueries({ queryKey: ["market-pulse"] }),
   });
   if (q.isPending) return <Loading />;
-  if (q.isError) return <ErrorState retry={() => q.refetch()} />;
+  if (q.isError)
+    return <ErrorState retry={() => q.refetch()} error={q.error} />;
   const relevant = supportedWatchlistEvents(q.data.events);
   const recent = (watchlistOnly ? relevant : q.data.events).filter(
     (e) => e.recent,
@@ -235,11 +237,15 @@ export function MarketPulsePage() {
             <h3>
               {watchlistOnly
                 ? "No supported watchlist matches yet"
-                : "No recent events cached yet"}
+                : q.data.status === "source_unavailable"
+                  ? "Market Pulse sources are unavailable"
+                  : q.data.status === "empty_cache"
+                    ? "No cached market events yet"
+                    : "No recent events cached yet"}
             </h3>
             <p className="mt-2">
-              This is a coverage limit, not a claim that nothing happened. Add
-              companies to your watchlist and cache their Research evidence.
+              {q.data.diagnostic} This is a coverage limit, not a claim that
+              nothing happened.
             </p>
           </div>
         )}

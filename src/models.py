@@ -60,3 +60,6 @@ class MarketSnapshot:
     currency: str = "USD"
     history: list[dict] = field(default_factory=list)
     error: str | None = None
+    error_code: str | None = None
+    attempts: list[dict] = field(default_factory=list)
+    cache_ttl_seconds: int = 300
