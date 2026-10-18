@@ -1,10 +1,13 @@
 """Run: python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000."""
 
 import logging
+import os
+import time
 from typing import Annotated, Literal
+from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 load_dotenv()
@@ -20,6 +23,7 @@ from backend.models import (
     Thesis,
 )
 from backend.service import ResearchService
+from src.ask_intent import route_ask
 from src.company_directory import CompanyDirectory
 from src.sec import normalize_ticker
 from src.thesis import RULE_METRICS
@@ -94,11 +98,23 @@ def valid_investor(key):
 
 @app.middleware("http")
 async def log_unexpected_errors(request, call_next):
+    request_id = uuid4().hex
+    request.state.request_id = request_id
+    started = time.perf_counter()
     try:
-        return await call_next(request)
-    except Exception:
-        logger.exception(
-            "Unhandled API error method=%s path=%s", request.method, request.url.path
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+    except Exception as exc:
+        logger.error(
+            "api_request_failed request_id=%s routed_intent=%s duration_ms=%.1f "
+            "exception_type=%s method=%s path=%s",
+            request_id,
+            getattr(request.state, "routed_intent", "unrouted"),
+            (time.perf_counter() - started) * 1000,
+            type(exc).__name__,
+            request.method,
+            request.url.path,
         )
         raise
 
@@ -131,6 +147,11 @@ def home(background: BackgroundTasks):
 @app.get("/api/investors", response_model=list[Investor])
 def investors():
     return service.investors()
+
+
+@app.get("/api/investors/summaries", response_model=list[Investor])
+def investor_summaries():
+    return service.investor_summaries()
 
 
 @app.get("/api/portfolio-overlap")
@@ -365,14 +386,34 @@ def disclosures():
 
 
 @app.post("/api/ask", response_model=Answer)
-def ask(data: AskInput, background: BackgroundTasks):
+def ask(data: AskInput, background: BackgroundTasks, request: Request):
+    started = time.perf_counter()
+    request_id = request.state.request_id
     if any(
         word in data.question.lower()
         for word in ("news", "macro", "market pulse", "oil prices")
     ):
         service.market_pulse.schedule(background)
     ticker = valid_ticker(data.ticker) if data.ticker else None
-    return service.ask(data.question.strip(), ticker, data.mode)
+    route = route_ask(data.question.strip(), data.mode, ticker)
+    request.state.routed_intent = route.intent.value
+    result = service.ask(
+        data.question.strip(),
+        ticker,
+        data.mode,
+        route=route,
+        request_id=request_id,
+    )
+    result["request_id"] = request_id
+    logger.info(
+        "ask_request_completed request_id=%s routed_intent=%s duration_ms=%.1f "
+        "exception_type=%s",
+        request_id,
+        route.intent.value,
+        (time.perf_counter() - started) * 1000,
+        "None",
+    )
+    return result
 
 
 @app.get("/api/market-pulse")
@@ -413,9 +454,14 @@ def market_pulse_impacts(event_id: str):
 
 
 @app.get("/api/intelligence/feed")
-def intelligence_feed(category: str = "all", limit: int = 50):
+def intelligence_feed(
+    background: BackgroundTasks, category: str = "all", limit: int = 50
+):
     try:
-        return service.intelligence.feed(category, limit)
+        if os.getenv("THESISLENS_OFFLINE", "false").lower() == "true":
+            return service.intelligence.feed(category, limit)
+        service.intelligence.schedule(background)
+        return service.intelligence.feed(category, limit, materialize=False)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -426,8 +472,11 @@ def institutional_activity(ticker: str):
 
 
 @app.get("/api/intelligence/daily-brief")
-def intelligence_daily_brief():
-    return service.intelligence.daily_brief()
+def intelligence_daily_brief(background: BackgroundTasks):
+    if os.getenv("THESISLENS_OFFLINE", "false").lower() == "true":
+        return service.intelligence.daily_brief()
+    service.intelligence.schedule(background)
+    return service.intelligence.daily_brief(materialize=False)
 
 
 @app.get("/api/intelligence/outbox")

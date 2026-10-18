@@ -9,9 +9,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
       new QueryClient({
         defaultOptions: {
           queries: {
-            staleTime: 60_000,
-            gcTime: 600_000,
-            refetchOnWindowFocus: true,
+            staleTime: 5 * 60_000,
+            gcTime: 30 * 60_000,
+            refetchOnWindowFocus: false,
+            refetchOnReconnect: true,
             retry: (count, error) =>
               count < 2 &&
               (!(error instanceof ApiError) || error.status >= 500),
