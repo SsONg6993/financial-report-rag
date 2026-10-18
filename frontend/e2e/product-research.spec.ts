@@ -117,6 +117,46 @@ test("general AI is intent-routed and identifies a stopped local service", async
   });
 });
 
+test("Auto and General modes render a controlled temporary Ollama failure", async ({
+  page,
+}) => {
+  await page.route("**/api/ask", async (route) => {
+    const body = route.request().postDataJSON() as { mode: string };
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        answer: "The local Ollama request failed temporarily. Retry in a moment.",
+        evidence: [],
+        source: "Local General AI runtime",
+        intent: "general",
+        mode: body.mode,
+        configuration_error:
+          "The local Ollama request failed temporarily. Retry in a moment.",
+        configuration_error_code: "ollama_temporary_error",
+        request_id: `request-${body.mode}`,
+        privacy: "No private workspace data was sent to an external model.",
+      }),
+    });
+  });
+
+  for (const mode of ["auto", "general"]) {
+    await page.goto("/ask");
+    await page.getByRole("button", { name: mode, exact: true }).click();
+    await page
+      .getByLabel("What would you like to investigate?")
+      .fill("How do you think medical AI will develop in the future?");
+    await page
+      .getByRole("button", { name: "Ask ThesisLens", exact: true })
+      .click();
+    const alert = page.getByRole("article").getByRole("alert");
+    await expect(alert).toContainText("Local AI request failed temporarily");
+    await expect(alert).toContainText(`Reference: request-${mode}`);
+    await expect(page.getByRole("article")).not.toContainText("AAPL");
+    await expect(page.getByText(/Sources & evidence/)).toHaveCount(0);
+  }
+});
+
 test("holdings preserve verified navigation and explain unknown cost", async ({
   page,
 }) => {
@@ -239,6 +279,35 @@ test("Ask routes sector questions away from company financial statements", async
   await expect(answer).not.toContainText("Numbers That Matter");
   await expect(answer).not.toContainText("Free cash flow");
   await expect(answer.getByText(/Source Citations/)).toBeVisible();
+});
+
+test("Ask renders duplicate sector descriptions without React key warnings", async ({
+  page,
+}) => {
+  const duplicate =
+    "Berkshire Hathaway · Unknown · LENNAR CORP: increased reported shares (2026-03-31 to 2026-06-30).";
+  const keyWarnings: string[] = [];
+  page.on("console", (message) => {
+    if (/same key|unique key/i.test(message.text()))
+      keyWarnings.push(message.text());
+  });
+  await page.route("**/api/ask", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.sector_sections.accumulation = [duplicate, duplicate];
+    await route.fulfill({ response, json: body });
+  });
+
+  await page.goto("/ask");
+  await page
+    .getByLabel("What would you like to investigate?")
+    .fill("Which sectors are institutional investors buying?");
+  await page
+    .getByRole("button", { name: "Ask ThesisLens", exact: true })
+    .click();
+
+  await expect(page.getByText(duplicate, { exact: true })).toHaveCount(2);
+  expect(keyWarnings).toEqual([]);
 });
 
 test("Ask quarterly numbers and annual context stay separate", async ({

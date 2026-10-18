@@ -530,9 +530,10 @@ function NetworkCanvas({
 
 export function PortfolioNetwork() {
   const investors = useQuery({
-    queryKey: ["investors"],
+    queryKey: ["investor-summaries"],
     queryFn: ({ signal }) =>
-      api("/investors", z.array(investorSchema), { signal }),
+      api("/investors/summaries", z.array(investorSchema), { signal }),
+    staleTime: 10 * 60_000,
   });
   const [selected, setSelected] = useState<string[]>([]);
   const [period, setPeriod] = useState<string | null>(null);
@@ -565,7 +566,7 @@ export function PortfolioNetwork() {
         signal,
       }),
     enabled: selected.length >= 2,
-    staleTime: 60_000,
+    staleTime: 10 * 60_000,
   });
   useEffect(() => {
     if (!playing || reducedMotion || !overlap.data?.periods.length) return;

@@ -4,6 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { api, answerSchema, money, percent } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { MutationError, Sources } from "@/components/research-ui";
+import { staticListKey } from "./list-key";
 import {
   ArrowUp,
   BookOpenCheck,
@@ -19,7 +20,7 @@ const examples = [
   "Which recent news may affect my watchlist?",
   "Why did Berkshire reduce AAPL?",
   "Which investors I follow disclose GOOGL?",
-  "What changed in AAPL’s latest quarter?",
+  "What changed in UNH’s latest filing?",
   "What idea should I track for NVDA?",
 ];
 const generalErrorTitle = (code?: string | null) => {
@@ -28,6 +29,10 @@ const generalErrorTitle = (code?: string | null) => {
   if (code === "ollama_model_missing") return "Ollama model is missing";
   if (code === "ollama_timeout") return "Ollama response timed out";
   if (code === "ollama_loading") return "Ollama model is loading";
+  if (code === "ollama_invalid_response")
+    return "Ollama returned an invalid response";
+  if (code === "ollama_temporary_error")
+    return "Local AI request failed temporarily";
   if (code === "remote_llm_disabled") return "Remote LLM access is disabled";
   return "General AI configuration error";
 };
@@ -188,8 +193,7 @@ export function AskResearch() {
                   Unknown classifications are included · classified value
                   coverage{" "}
                   {percent(
-                    m.data.sector_analysis.coverage
-                      .classified_value_percentage,
+                    m.data.sector_analysis.coverage.classified_value_percentage,
                   )}
                 </p>
               </section>
@@ -201,8 +205,11 @@ export function AskResearch() {
                     {(m.data.sector_sections.accumulation.length
                       ? m.data.sector_sections.accumulation
                       : ["No comparable reported share increases available."]
-                    ).map((item) => (
-                      <p className="mt-2 text-sm muted" key={item}>
+                    ).map((item, index) => (
+                      <p
+                        className="mt-2 text-sm muted"
+                        key={staticListKey("accumulation", item, index)}
+                      >
                         {item}
                       </p>
                     ))}
@@ -212,8 +219,11 @@ export function AskResearch() {
                     {(m.data.sector_sections.reductions.length
                       ? m.data.sector_sections.reductions
                       : ["No comparable reported share reductions available."]
-                    ).map((item) => (
-                      <p className="mt-2 text-sm muted" key={item}>
+                    ).map((item, index) => (
+                      <p
+                        className="mt-2 text-sm muted"
+                        key={staticListKey("reductions", item, index)}
+                      >
                         {item}
                       </p>
                     ))}
@@ -226,8 +236,11 @@ export function AskResearch() {
                   {(m.data.sector_sections.historical_changes.length
                     ? m.data.sector_sections.historical_changes
                     : ["A second comparable disclosure is not available."]
-                  ).map((item) => (
-                    <p className="text-sm muted" key={item}>
+                  ).map((item, index) => (
+                    <p
+                      className="text-sm muted"
+                      key={staticListKey("historical", item, index)}
+                    >
                       {item}
                     </p>
                   ))}
@@ -236,8 +249,11 @@ export function AskResearch() {
               <section>
                 <h3>What the Data Does Not Tell Us</h3>
                 <div className="mt-2 space-y-2">
-                  {m.data.sector_sections.limitations.map((item) => (
-                    <p className="text-sm muted" key={item}>
+                  {m.data.sector_sections.limitations.map((item, index) => (
+                    <p
+                      className="text-sm muted"
+                      key={staticListKey("limitations", item, index)}
+                    >
                       {item}
                     </p>
                   ))}
@@ -266,7 +282,7 @@ export function AskResearch() {
                       (items as string[]).map((item, index) => (
                         <p
                           className={`text-sm leading-6 whitespace-pre-line ${title === "Numbers That Matter" ? "rounded-xl border border-border p-4 font-medium" : "muted"}`}
-                          key={index}
+                          key={staticListKey(String(title), item, index)}
                         >
                           {item}
                         </p>
@@ -291,7 +307,7 @@ export function AskResearch() {
                   <div className="mt-2 space-y-2">
                     {m.data.sections.annual_context.map((item, index) => (
                       <p
-                        key={index}
+                        key={staticListKey("annual-context", item, index)}
                         className="text-sm muted whitespace-pre-line"
                       >
                         {item}
@@ -312,6 +328,9 @@ export function AskResearch() {
                 {generalErrorTitle(m.data.configuration_error_code)}
               </strong>
               <p className="mt-2 text-sm">{m.data.configuration_error}</p>
+              {m.data.request_id && (
+                <p className="source">Reference: {m.data.request_id}</p>
+              )}
             </div>
           )}
           {m.data.evidence.length > 0 && (

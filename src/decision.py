@@ -109,7 +109,13 @@ class OllamaDecisionProvider:
         try:
             response = self.session.post(
                 f"{self.base_url}/api/generate",
-                json={"model": self.model, "prompt": prompt, "stream": False, "format": "json"},
+                json={
+                    "model": self.model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "format": "json",
+                    "keep_alive": "30s",
+                },
                 timeout=self.timeout,
             )
             response.raise_for_status()

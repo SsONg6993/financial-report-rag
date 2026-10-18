@@ -1,6 +1,11 @@
 from dataclasses import replace
 
-from backend.research_context import comparisons, risk_cards, structured_answer
+from backend.research_context import (
+    business_overview,
+    comparisons,
+    risk_cards,
+    structured_answer,
+)
 from backend.service import ResearchService
 from src.config import AppConfig
 from src.local_store import LocalStore
@@ -30,6 +35,44 @@ def test_quote_fallback_rejects_empty_snapshot():
 
     assert ResilientMarketProvider([Empty(), Working()]).snapshot("META").provider == "fallback"
     assert ResilientMarketProvider([Empty()]).snapshot("META").error
+
+
+def test_market_provider_reports_attempts_and_disabled_configuration():
+    class Empty:
+        name = "empty"
+
+        def snapshot(self, ticker):
+            return MarketSnapshot(ticker=ticker, error="no quote")
+
+    failed = ResilientMarketProvider([Empty()]).snapshot("UNH")
+    assert failed.error_code == "provider_unavailable"
+    assert failed.attempts == [
+        {"provider": "empty", "status": "unavailable", "reason": "no quote"}
+    ]
+    disabled = ResilientMarketProvider([]).snapshot("UNH")
+    assert disabled.error_code == "not_configured"
+    assert disabled.attempts == []
+
+
+def test_business_overview_prefers_item_one_and_rejects_risk_section():
+    chunks = [
+        {
+            "text": "Risks could adversely affect the business.",
+            "section": "Item 1A. Risk Factors",
+            "source_url": "https://www.sec.gov/risk",
+        },
+        {
+            "text": "UnitedHealth Group is a diversified health care company serving consumers through health benefits and services.",
+            "section": "Item 1. Business",
+            "form": "10-K",
+            "period": "2025-12-31",
+            "source_url": "https://www.sec.gov/business",
+        },
+    ]
+    result = business_overview(chunks)
+    assert result is not None
+    assert result["section"] == "Item 1. Business"
+    assert result["source_url"] == "https://www.sec.gov/business"
 
 
 def test_market_cache_survives_failure_without_sec_data(tmp_path, monkeypatch):

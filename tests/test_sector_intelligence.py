@@ -3,6 +3,7 @@ from src.sector_intelligence import (
     UNKNOWN_SECTOR,
     CorporateAction,
     analyze_sector_exposure,
+    classify_ticker,
 )
 
 
@@ -39,6 +40,12 @@ def test_identifier_backed_allocation_keeps_unknown_in_coverage():
     assert analysis["coverage"]["classified_value_percentage"] == 0.8
     assert analysis["coverage"]["unknown_value_percentage"] == 0.2
     assert analysis["comparison"]["available"] is False
+
+
+def test_company_sector_requires_an_explicit_verified_registry_entry():
+    assert classify_ticker("UNH")["sector"] == "Health Care"
+    assert classify_ticker("UNMAPPED")["sector"] == UNKNOWN_SECTOR
+    assert classify_ticker("UNMAPPED")["status"] == "unknown"
 
 
 def test_quarter_changes_separate_reported_shares_from_weight_changes():

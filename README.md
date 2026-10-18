@@ -22,7 +22,7 @@ After installing the Python and frontend dependencies once, start the complete l
 .\start-thesislens.ps1
 ```
 
-The manager verifies the project `.venv`, detects port conflicts, reuses only a matching healthy Backend, starts installed local Ollama when needed, checks the configured model without downloading it, starts one Frontend, waits for readiness, and opens `http://127.0.0.1:3000`. Use `-NoBrowser` for terminal-only startup. It records only process IDs, start times, a random instance identifier, and build metadata under ignored `.runtime/`; rotating logs are capped there as well.
+The manager verifies the project `.venv`, detects port conflicts, reuses only a matching healthy Backend, starts installed local Ollama when needed, checks the configured model without downloading it, starts one Frontend, waits for readiness, verifies `http://localhost:3000`, and opens that address. Internal process and health probes continue to use IPv4 loopback. Use `-NoBrowser` for terminal-only startup. It records only process IDs, start times, a random instance identifier, and build metadata under ignored `.runtime/`; rotating logs are capped there as well.
 
 ```powershell
 .\status-thesislens.ps1       # safe dependency summary; never prints secrets
@@ -101,7 +101,16 @@ Request-triggered background refresh uses persistent check/error timestamps, pro
 
 | Source | Check interval | Important distinction |
 | --- | --- | --- |
-| Yahoo market snapshot | 5 minutes | Optional, delayed/unavailable; timestamp is shown |
+| Configured market snapshot | 5 minutes by default | Optional, delayed/unavailable; provider, timestamp, failures, and stale-cache state are shown |
+
+Market quotes are optional and never gate SEC filing research. Configure the
+comma-separated `MARKET_DATA_PROVIDERS` list with `yahoo` and/or `nasdaq`, or
+leave it empty for filing-only operation. `MARKET_DATA_TIMEOUT_SECONDS` bounds
+each provider request and `MARKET_CACHE_TTL_SECONDS` controls the displayed
+freshness policy. The backend records provider attempts, preserves the latest
+successful quote when a refresh fails, and never exposes credentials to the
+frontend. These are best-effort public sources with no uptime or licensing SLA;
+operators remain responsible for complying with current provider terms.
 | Official ARKK holdings | 24 hours | Fund-level daily holdings, not institutional 13F |
 | SEC Form 4 | 30 minutes | Insider transaction date and filing date; P/S codes label BUY/SELL, not recommendations |
 | Schedule 13D/G | 1 hour | Disclosed ownership percentage, filer and amendment; no inferred motives |
@@ -157,12 +166,14 @@ An evidence-driven investment thesis monitoring and public-disclosure research s
 
 ThesisLens helps investors track whether new company evidence strengthens or weakens their own investment thesis, while using public institutional and public-official disclosures for research and idea discovery. It reports evidence relationships and research questions, without BUY / SELL / HOLD recommendations or a numeric investment score.
 
-### Four internal/debug pages
+### Four primary destinations
 
 - **Home**: locally persisted watchlist, thesis-health counts, meaningful comparable-period changes, and followed disclosures.
-- **Research**: a compact company summary, editable thesis points, evidence evaluation, thesis timeline, dated changes, and an investigation checklist. Valuation and technical evidence tools are collapsed.
-- **Public Portfolios**: official institutional disclosures, reported holdings and share changes, plus a separate OGE public-financial-disclosure section.
-- **Ask**: questions across locally loaded theses, company facts, filing evidence, and public portfolio snapshots.
+- **Explore**: institutional portfolios, overlap analysis, range-preserving public-official disclosures, and contextual access to company Research.
+- **Intelligence**: the personalized public-source feed and contextual access to Market Pulse.
+- **Ask AI**: intent-routed questions across locally loaded theses, company facts, filing evidence, public portfolio snapshots, and configured local general AI.
+
+Runtime **Status** remains available as a secondary system entry. Legacy `/discover`, `/research`, `/intelligence`, and `/market-pulse` URLs remain compatible; `/discover` redirects to `/explore`.
 
 The previous ten-tab dashboard has been replaced. Financial calculations, risk extraction, valuation, retrieval, reranking, evaluation, and optional providers remain reusable backend modules.
 
@@ -234,7 +245,7 @@ Narrative evaluation retrieves current filing evidence and a comparable same-for
 
 13F has no ticker or sector fields. Unambiguous exact issuer-name matches against the official SEC ticker directory can supply tickers; unmatched/ambiguous classes need user verification. Optional Yahoo Finance sector enrichment shows coverage and leaves unmatched holdings unclassified.
 
-OGE reports are not exact brokerage portfolios. Amount/income ranges are preserved, weights are never inferred, and unknown filing dates remain unknown. The selected official May 2026 transaction PDF has a noisy text layer: invalid rows are excluded and source-page excerpts are available for verification. Annual PDFs retain source excerpts; reliable annual section normalization and OCR require further work. OGE access requirements may prevent automatic downloads.
+OGE reports are not exact brokerage portfolios. Amount/income ranges are preserved, weights are never inferred, and unknown filing dates remain unknown. OGE 278-T transaction reports use a form-specific row validator; OGE 278e annual reports remain a separate source-excerpt workflow. The selected official May 2026 transaction PDF has a degraded text layer: only rows with validated dates, transaction types, notification fields, and official amount bands are shown, while rejected rows remain counted by reason. Every verified row retains its source page. OCR is reserved for unusable text layers and requires a compatible local OCR runtime; it is not used to inflate coverage. OGE access requirements may prevent automatic downloads.
 
 ## AAPL + Berkshire example
 
