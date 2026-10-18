@@ -31,7 +31,7 @@ test("light mode is optional and persists during navigation", async ({
   await page.goto("/research/AAPL");
   await page.getByRole("button", { name: "Switch to light mode" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-  await page.getByRole("link", { name: "Discover", exact: true }).click();
+  await page.getByRole("link", { name: "Explore", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await expect(
     page.getByRole("heading", { name: "Featured investors" }),
@@ -43,6 +43,12 @@ test("light mode is optional and persists during navigation", async ({
 });
 
 test("rendered disclosure context and viewport layout", async ({ page }) => {
+  const disclosureRequests: string[] = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path === "/api/insiders/AAPL" || path === "/api/ownership/AAPL")
+      disclosureRequests.push(path);
+  });
   await page.goto("/research/AAPL");
   await page
     .getByRole("heading", { name: "Ideas to Track", exact: true })
@@ -50,6 +56,7 @@ test("rendered disclosure context and viewport layout", async ({ page }) => {
   await page.screenshot({
     path: `test-results/research-viewport-${test.info().project.name}.png`,
   });
+  expect(disclosureRequests).toEqual([]);
   await page
     .getByText("Advanced tracking, disclosures, and source details", {
       exact: true,
@@ -74,17 +81,17 @@ test("rendered disclosure context and viewport layout", async ({ page }) => {
   ).toBe(true);
 });
 
-test("real Home and Discover have dated disclosure data", async ({ page }) => {
+test("real Home and Explore have dated disclosure data", async ({ page }) => {
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Top Investor Activity" }),
+    page.getByRole("heading", { name: "Institutional Activity" }),
   ).toBeVisible();
   await expect(page.getByText("SEC Form 13F").first()).toBeVisible();
   await page.screenshot({
     path: `test-results/home-${test.info().project.name}.png`,
     fullPage: true,
   });
-  await page.getByRole("link", { name: "Discover", exact: true }).click();
+  await page.getByRole("link", { name: "Explore", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Featured investors" }),
   ).toBeVisible();
@@ -251,9 +258,7 @@ test("watchlist works without a thesis and Ask does not invent rationale", async
   await expect(
     page.getByRole("heading", { name: "My Watchlist" }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "NVDA", exact: true }).last(),
-  ).toBeVisible();
+  await expect(page.getByRole("row", { name: /NVDA/ })).toBeVisible();
   await page.goto("/ask");
   await page
     .getByLabel("What would you like to investigate?")

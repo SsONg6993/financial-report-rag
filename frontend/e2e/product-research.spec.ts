@@ -117,6 +117,46 @@ test("general AI is intent-routed and identifies a stopped local service", async
   });
 });
 
+test("Auto and General modes render a controlled temporary Ollama failure", async ({
+  page,
+}) => {
+  await page.route("**/api/ask", async (route) => {
+    const body = route.request().postDataJSON() as { mode: string };
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        answer: "The local Ollama request failed temporarily. Retry in a moment.",
+        evidence: [],
+        source: "Local General AI runtime",
+        intent: "general",
+        mode: body.mode,
+        configuration_error:
+          "The local Ollama request failed temporarily. Retry in a moment.",
+        configuration_error_code: "ollama_temporary_error",
+        request_id: `request-${body.mode}`,
+        privacy: "No private workspace data was sent to an external model.",
+      }),
+    });
+  });
+
+  for (const mode of ["auto", "general"]) {
+    await page.goto("/ask");
+    await page.getByRole("button", { name: mode, exact: true }).click();
+    await page
+      .getByLabel("What would you like to investigate?")
+      .fill("How do you think medical AI will develop in the future?");
+    await page
+      .getByRole("button", { name: "Ask ThesisLens", exact: true })
+      .click();
+    const alert = page.getByRole("article").getByRole("alert");
+    await expect(alert).toContainText("Local AI request failed temporarily");
+    await expect(alert).toContainText(`Reference: request-${mode}`);
+    await expect(page.getByRole("article")).not.toContainText("AAPL");
+    await expect(page.getByText(/Sources & evidence/)).toHaveCount(0);
+  }
+});
+
 test("holdings preserve verified navigation and explain unknown cost", async ({
   page,
 }) => {
@@ -182,6 +222,94 @@ test("historical chart exposes real periods, top holdings, and source", async ({
   });
 });
 
+test("institutional sector intelligence is dated, filterable, and explicit about unknowns", async ({
+  page,
+}) => {
+  await page.goto("/discover/berkshire");
+  const section = page
+    .getByRole("heading", {
+      name: "Institutional Sector Intelligence",
+      exact: true,
+    })
+    .locator("xpath=ancestor::section");
+  await expect(section).toContainText("Verified historical allocation");
+  await expect(section).toContainText("Information Technology");
+  await expect(section).toContainText("Unknown classification");
+  await expect(section.getByLabel("Reporting period filter")).toBeVisible();
+  await section
+    .getByLabel("Sector filter")
+    .selectOption("Information Technology");
+  await expect(section.getByText(/not a prediction/i)).toBeVisible();
+  await expect(
+    section.getByRole("link", { name: "Original disclosure" }),
+  ).toHaveAttribute("href", /sec\.gov/);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: `test-results/sector-intelligence-${test.info().project.name}.png`,
+    fullPage: true,
+  });
+});
+
+test("Ask routes sector questions away from company financial statements", async ({
+  page,
+}) => {
+  await page.goto("/ask");
+  await page
+    .getByLabel("What would you like to investigate?")
+    .fill("May I know current investor likely to invest in which sector?");
+  await page
+    .getByRole("button", { name: "Ask ThesisLens", exact: true })
+    .click();
+  for (const title of [
+    "Short Answer",
+    "Sector Allocation Table",
+    "Reported Accumulation / Reduction",
+    "Historical Changes",
+    "What the Data Does Not Tell Us",
+  ]) {
+    await expect(
+      page.getByRole("heading", { name: title, exact: true }),
+    ).toBeVisible();
+  }
+  const answer = page.getByRole("article");
+  await expect(answer).not.toContainText("Numbers That Matter");
+  await expect(answer).not.toContainText("Free cash flow");
+  await expect(answer.getByText(/Source Citations/)).toBeVisible();
+});
+
+test("Ask renders duplicate sector descriptions without React key warnings", async ({
+  page,
+}) => {
+  const duplicate =
+    "Berkshire Hathaway · Unknown · LENNAR CORP: increased reported shares (2026-03-31 to 2026-06-30).";
+  const keyWarnings: string[] = [];
+  page.on("console", (message) => {
+    if (/same key|unique key/i.test(message.text()))
+      keyWarnings.push(message.text());
+  });
+  await page.route("**/api/ask", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.sector_sections.accumulation = [duplicate, duplicate];
+    await route.fulfill({ response, json: body });
+  });
+
+  await page.goto("/ask");
+  await page
+    .getByLabel("What would you like to investigate?")
+    .fill("Which sectors are institutional investors buying?");
+  await page
+    .getByRole("button", { name: "Ask ThesisLens", exact: true })
+    .click();
+
+  await expect(page.getByText(duplicate, { exact: true })).toHaveCount(2);
+  expect(keyWarnings).toEqual([]);
+});
+
 test("Ask quarterly numbers and annual context stay separate", async ({
   page,
 }) => {
@@ -214,4 +342,48 @@ test("Ask quarterly numbers and annual context stay separate", async ({
         .locator(".."),
     ).not.toContainText("FY2025");
   }
+});
+
+test("runtime dashboard explains dependency state", async ({ page }) => {
+  await page.route("**/api/readiness", (route) =>
+    route.fulfill({
+      json: {
+        status: "ready",
+        service: "ThesisLens Backend",
+        api_version: "0.1.0",
+        build_commit: "abc123",
+        checked_at: "2026-10-10T00:00:00Z",
+        backend: { status: "ready" },
+        database: { status: "ready", accessible: true },
+        cache: { status: "ready", accessible: true },
+        market_pulse: {
+          status: "stale_cache",
+          detail: "Using retained cache.",
+        },
+        ollama: {
+          status: "model_missing",
+          model: "qwen3:4b",
+          model_available: false,
+          detail: "Download requires approval.",
+        },
+      },
+    }),
+  );
+  await page.goto("/status");
+  await expect(
+    page.getByRole("heading", { name: "System status" }),
+  ).toBeVisible();
+  await expect(page.getByTestId("runtime-market-pulse")).toContainText(
+    "Stale cache",
+  );
+  await expect(page.getByTestId("runtime-general-ai")).toContainText(
+    "Model missing",
+  );
+  await expect(
+    page.getByRole("button", { name: "Refresh status" }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: `test-results/runtime-dashboard-${test.info().project.name}.png`,
+    fullPage: true,
+  });
 });

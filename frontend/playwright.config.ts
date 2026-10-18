@@ -53,7 +53,7 @@ export default defineConfig({
       url: app,
       reuseExistingServer: false,
       timeout: 60_000,
-      env: { API_URL: api },
+      env: { API_URL: api, NEXT_DIST_DIR: ".next-e2e" },
     },
   ],
   use: {

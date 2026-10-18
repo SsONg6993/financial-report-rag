@@ -20,6 +20,9 @@ class AppConfig:
     qdrant_path: str
     ollama_base_url: str
     ollama_model: str
+    ollama_readiness_timeout: float
+    ollama_inference_timeout: float
+    ollama_readiness_retries: int
     allow_remote_llm: bool
     enable_jev: bool
     typesafe_api_key: str
@@ -27,6 +30,9 @@ class AppConfig:
     jev_confidence_threshold: float
     chunk_size: int
     chunk_overlap: int
+    market_data_providers: tuple[str, ...] = ("yahoo", "nasdaq")
+    market_data_timeout: float = 12.0
+    market_cache_ttl_seconds: int = 300
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -38,6 +44,15 @@ class AppConfig:
                 "OLLAMA_BASE_URL", os.getenv("OLLAMA_URL", "http://localhost:11434")
             ),
             ollama_model=os.getenv("OLLAMA_MODEL", "qwen3:4b"),
+            ollama_readiness_timeout=float(
+                os.getenv("OLLAMA_READINESS_TIMEOUT_SECONDS", "5")
+            ),
+            ollama_inference_timeout=float(
+                os.getenv("OLLAMA_INFERENCE_TIMEOUT_SECONDS", "120")
+            ),
+            ollama_readiness_retries=max(
+                0, min(int(os.getenv("OLLAMA_READINESS_RETRIES", "1")), 3)
+            ),
             allow_remote_llm=_boolean("ALLOW_REMOTE_LLM"),
             enable_jev=_boolean("ENABLE_JEV"),
             typesafe_api_key=os.getenv("TYPESAFE_API_KEY", "").strip(),
@@ -47,4 +62,15 @@ class AppConfig:
             ),
             chunk_size=int(os.getenv("CHUNK_SIZE", "1600")),
             chunk_overlap=int(os.getenv("CHUNK_OVERLAP", "200")),
+            market_data_providers=tuple(
+                item.strip().lower()
+                for item in os.getenv("MARKET_DATA_PROVIDERS", "yahoo,nasdaq").split(",")
+                if item.strip()
+            ),
+            market_data_timeout=max(
+                1.0, min(float(os.getenv("MARKET_DATA_TIMEOUT_SECONDS", "12")), 30.0)
+            ),
+            market_cache_ttl_seconds=max(
+                60, int(os.getenv("MARKET_CACHE_TTL_SECONDS", "300"))
+            ),
         )

@@ -249,12 +249,41 @@ class LocalStore:
                 (kind, entity_id, snapshot_id, utc_now(), json.dumps(payload)),
             )
 
-    def snapshots(self, kind: str, entity_id: str) -> list[dict]:
+    def snapshots(
+        self, kind: str, entity_id: str, limit: int | None = None
+    ) -> list[dict]:
+        bounded = None if limit is None else min(max(limit, 1), 5000)
+        sql = (
+            "SELECT payload FROM snapshots WHERE kind=? AND entity_id=? "
+            "ORDER BY snapshot_id DESC"
+        )
+        parameters: tuple = (kind, entity_id)
+        if bounded is not None:
+            sql += " LIMIT ?"
+            parameters = (*parameters, bounded)
         with self.connect() as db:
             return [
                 json.loads(row[0])
-                for row in db.execute(
-                    "SELECT payload FROM snapshots WHERE kind=? AND entity_id=? ORDER BY snapshot_id DESC",
-                    (kind, entity_id),
-                )
+                for row in db.execute(sql, parameters)
             ]
+
+    def latest_snapshots(
+        self, kind: str, entity_ids: list[str]
+    ) -> dict[str, dict]:
+        """Load one latest payload per entity without an N+1 query loop."""
+        keys = list(dict.fromkeys(key for key in entity_ids if key))
+        result: dict[str, dict] = {}
+        for offset in range(0, len(keys), 400):
+            batch = keys[offset : offset + 400]
+            placeholders = ",".join("?" for _ in batch)
+            with self.connect() as db:
+                rows = db.execute(
+                    "SELECT entity_id,payload FROM snapshots "
+                    f"WHERE kind=? AND entity_id IN ({placeholders}) "
+                    "ORDER BY entity_id,snapshot_id DESC",
+                    (kind, *batch),
+                ).fetchall()
+            for entity_id, payload in rows:
+                if entity_id not in result:
+                    result[entity_id] = json.loads(payload)
+        return result
