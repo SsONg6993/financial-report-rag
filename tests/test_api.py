@@ -291,6 +291,44 @@ def test_sector_explicit_comparison_limit_and_named_manager(client):
     assert analysis["institutions"][0]["institution_id"] == "berkshire"
 
 
+def test_sector_answer_preserves_same_issuer_security_classes(client):
+    for period, class_a, class_b in (
+        ("2026-03-31", 100, 20),
+        ("2026-06-30", 125, 30),
+    ):
+        snapshot = PortfolioSnapshot(
+            "berkshire",
+            period,
+            "2026-08-14",
+            "https://www.sec.gov/berkshire-fixture",
+            f"berkshire-{period}",
+            holdings=[
+                Holding("LENNAR CORP", "CL A", "526057104", class_a, 1_000),
+                Holding("LENNAR CORP", "CL B", "526057302", class_b, 200),
+            ],
+        )
+        main.service.store.save_snapshot(
+            "portfolio", "berkshire", period, snapshot.to_dict()
+        )
+
+    payload = client.post(
+        "/api/ask",
+        json={
+            "question": "Which sectors does Warren Buffett favor?",
+            "mode": "auto",
+        },
+    ).json()
+    changes = payload["sector_analysis"]["institutions"][0]["position_changes"]
+    assert {change["cusip"] for change in changes} == {"526057104", "526057302"}
+    assert {change["security_class"] for change in changes} == {"CL A", "CL B"}
+    assert {change["share_type"] for change in changes} == {"SH"}
+    descriptions = payload["sector_sections"]["accumulation"]
+    assert len(descriptions) == 2
+    assert len(set(descriptions)) == 2
+    assert any("LENNAR CORP (CL A)" in item for item in descriptions)
+    assert any("LENNAR CORP (CL B)" in item for item in descriptions)
+
+
 def test_sector_overview_without_saved_data_is_useful(tmp_path):
     result = ResearchService(LocalStore(tmp_path / "empty-sector.sqlite3")).ask(
         "Which sectors are institutional investors buying?"
