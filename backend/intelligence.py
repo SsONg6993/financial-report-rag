@@ -1,6 +1,8 @@
 """Normalized, source-cited public events from existing dated caches only."""
 
 import hashlib
+import threading
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
@@ -76,6 +78,27 @@ class IntelligenceService:
     def __init__(self, research):
         self.research = research
         self.store = research.store
+        self._materialize_lock = threading.Lock()
+        self._materialize_inflight = False
+        self._last_materialized = 0.0
+
+    def schedule(self, background, cooldown_seconds: float = 300.0):
+        """Materialize cached events after the response, at most once per cooldown."""
+        with self._materialize_lock:
+            if self._materialize_inflight:
+                return
+            if time.monotonic() - self._last_materialized < cooldown_seconds:
+                return
+            self._materialize_inflight = True
+        background.add_task(self._materialize)
+
+    def _materialize(self):
+        try:
+            self.ingest_cached()
+            self._last_materialized = time.monotonic()
+        finally:
+            with self._materialize_lock:
+                self._materialize_inflight = False
 
     def _save(self, event: IntelligenceEvent):
         if not event.source_url.startswith("https://"):
@@ -178,8 +201,11 @@ class IntelligenceService:
                 facts={"category": source_event.category, "provider_id": source_event.provider_id},
             ))
 
-    def feed(self, category: str = "all", limit: int = 50) -> dict:
-        self.ingest_cached()
+    def feed(
+        self, category: str = "all", limit: int = 50, *, materialize: bool = True
+    ) -> dict:
+        if materialize:
+            self.ingest_cached()
         items = [IntelligenceEvent.model_validate(row) for row in self.store.intelligence_events(1000)]
         watched = set(self.store.watchlist())
         followed = set(self.store.follows())
@@ -242,8 +268,9 @@ class IntelligenceService:
                 "convergence": comparable and sum(counts.values()) >= 2,
                 "coverage": "Only cached tracked 13F managers; periods must match for aggregate counts. Not current holdings or sentiment."}
 
-    def daily_brief(self) -> dict:
-        self.ingest_cached()
+    def daily_brief(self, *, materialize: bool = True) -> dict:
+        if materialize:
+            self.ingest_cached()
         today = datetime.now(UTC).date().isoformat()
         events = [IntelligenceEvent.model_validate(row) for row in self.store.intelligence_events(1000)
                   if row["published_at"][:10] == today]

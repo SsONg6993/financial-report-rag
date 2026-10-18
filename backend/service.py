@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import threading
+import time
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,13 +15,21 @@ from backend.entity_registry import TrackedEntityRegistry
 from backend.intelligence import IntelligenceService
 from backend.period_facts import financial_context, quarterly_comparisons
 from backend.quarterly import quarter_facts, quarterly_changes
-from backend.research_context import comparisons, risk_cards, structured_answer
+from backend.research_context import (
+    business_overview,
+    comparisons,
+    risk_cards,
+    structured_answer,
+)
 from backend.suggestions import CATEGORIES, suggested_theses
 from backend.tickers import enrich_cached_classes
 from src.ask import answer_question
+from src.ask_intent import AskIntent, AskRoute, route_ask
 from src.company_directory import CompanyDirectory
 from src.config import AppConfig
 from src.decision import JevDecisionProvider
+from src.entry_price import estimate_entry_price
+from src.llm import generate_general_answer
 from src.local_store import LocalStore, utc_now
 from src.market import ResilientMarketProvider
 from src.portfolio_overlap import analyze_overlap
@@ -32,6 +41,7 @@ from src.portfolios import (
     fetch_ark_holdings,
 )
 from src.sec import normalize_ticker
+from src.sector_intelligence import analyze_sector_exposure, classify_ticker
 from src.thesis import evaluate_thesis
 from src.thesis_research import (
     company_changes,
@@ -73,15 +83,21 @@ class ResearchService:
             RSSPublicUpdateProvider,
             WebsiteFeedProvider,
         )
+
         self.public_providers = {
             "rss": RSSPublicUpdateProvider(self.market_pulse),
             "official_disclosure": OfficialDisclosureProvider(self),
             "website": WebsiteFeedProvider(),
         }
 
-    def cache_state(self, kind: str, key: str) -> dict:
-        cached = self.store.snapshots("refresh", f"{kind}:{key}")
-        state = cached[0] if cached else {}
+    def cache_state(
+        self, kind: str, key: str, cached_state: dict | None = None
+    ) -> dict:
+        if cached_state is None:
+            cached = self.store.snapshots("refresh", f"{kind}:{key}", limit=1)
+            state = cached[0] if cached else {}
+        else:
+            state = cached_state
         saved = state.get("checked_at")
         try:
             age = (
@@ -139,7 +155,8 @@ class ResearchService:
                 )
                 if not company:
                     raise RuntimeError(
-                        "; ".join(warnings) or "No supported SEC filings or facts available"
+                        "; ".join(warnings)
+                        or "No supported SEC filings or facts available"
                     )
                 for filing in comparable_filings(company.get("filings", [])):
                     try:
@@ -168,7 +185,10 @@ class ResearchService:
                     },
                 )
             elif kind == "market":
-                market = asdict(ResilientMarketProvider().snapshot(key))
+                market = asdict(
+                    ResilientMarketProvider.from_config(self.config).snapshot(key)
+                )
+                self.store.save_snapshot("market_status", key, "current", market)
                 if market.get("error") or not market.get("price"):
                     raise RuntimeError(market.get("error") or "No valid quote returned")
                 self.store.save_snapshot("market", key, "current", market)
@@ -208,11 +228,14 @@ class ResearchService:
         data = self.store.snapshots("company", normalize_ticker(ticker))
         return data[0] if data else None
 
-    def portfolios(self, key: str) -> list[PortfolioSnapshot]:
+    def portfolios(
+        self, key: str, limit: int | None = None
+    ) -> list[PortfolioSnapshot]:
         # Legacy snapshots were keyed by accession; the API uses reporting period.
         # The same filing can therefore exist under two cache keys, not two periods.
         unique = {}
-        for row in self.store.snapshots("portfolio", key):
+        raw_limit = limit * 4 if limit is not None else None
+        for row in self.store.snapshots("portfolio", key, raw_limit):
             snapshot = PortfolioSnapshot.from_dict(row)
             token = (snapshot.source_type, snapshot.reporting_period)
             old = unique.get(token)
@@ -227,15 +250,34 @@ class ResearchService:
             )
             if old is None or quality > old_quality:
                 unique[token] = snapshot
-        return sorted(unique.values(), key=lambda s: s.reporting_period, reverse=True)
+        snapshots = sorted(
+            unique.values(), key=lambda s: s.reporting_period, reverse=True
+        )
+        return snapshots[:limit] if limit is not None else snapshots
 
-    def investor(self, key: str) -> dict:
+    def investor(
+        self,
+        key: str,
+        *,
+        holdings_limit: int | None = None,
+        include_changes: bool = True,
+        include_entry_prices: bool = True,
+        snapshot_limit: int = 8,
+        _snapshots: list[PortfolioSnapshot] | None = None,
+        _followed: bool | None = None,
+        _refresh_state: dict | None = None,
+    ) -> dict:
         institution = self.registry.get(key)
         if institution is None:
             raise ValueError("Investor not found")
-        snapshots = self.portfolios(key)
+        snapshots = (
+            _snapshots
+            if _snapshots is not None
+            else self.portfolios(key, limit=snapshot_limit)
+        )
         latest = snapshots[0] if snapshots else None
-        state = self.cache_state("ark" if key == "ark" else "portfolio", key)
+        refresh_kind = "ark" if key == "ark" else "portfolio"
+        state = self.cache_state(refresh_kind, key, _refresh_state)
         freshness = (
             disclosure_freshness(
                 latest.reporting_period, source_type=latest.source_type
@@ -248,22 +290,73 @@ class ResearchService:
             freshness = (
                 f"Stale cached snapshot · holdings date {latest.reporting_period}"
             )
+        previous = snapshots[1] if len(snapshots) > 1 else None
+        previous_by_key = (
+            {holding.key: holding for holding in previous.holdings} if previous else {}
+        )
+        source_holdings = latest.holdings if latest else []
+        if holdings_limit is not None:
+            source_holdings = source_holdings[:holdings_limit]
+        verified_tickers = [
+            holding.ticker
+            for holding in source_holdings
+            if holding.ticker
+            and (
+                holding.ticker_source
+                or (latest and latest.source_type == "Official ARKK daily fund holdings")
+                or (latest and "unambiguous exact issuer-name matches" in str(latest.notes))
+            )
+        ]
+        market_by_ticker = (
+            self.store.latest_snapshots("market", verified_tickers)
+            if include_entry_prices
+            else {}
+        )
+        holdings = []
+        for holding in source_holdings:
+            ticker_verified = bool(
+                holding.ticker
+                and (
+                    holding.ticker_source
+                    or latest.source_type == "Official ARKK daily fund holdings"
+                    or "unambiguous exact issuer-name matches" in str(latest.notes)
+                )
+            )
+            holdings.append(
+                {
+                    **asdict(holding),
+                    "ticker_verified": ticker_verified,
+                    "entry_price_estimate": (
+                        estimate_entry_price(
+                            holding,
+                            previous_by_key.get(holding.key),
+                            previous,
+                            latest,
+                            market_by_ticker.get(holding.ticker),
+                        )
+                        if include_entry_prices
+                        else {}
+                    ),
+                }
+            )
         return {
             **asdict(institution),
             "style_tags": institution.style.split(" / "),
-            "followed": key in self.store.follows(),
+            "followed": (
+                _followed if _followed is not None else key in self.store.follows()
+            ),
             "available": bool(latest),
             "latest_period": latest.reporting_period if latest else None,
             "filing_date": latest.filing_date if latest else None,
             "source_url": latest.source_url if latest else None,
             "freshness": freshness,
             "refresh": state,
-            "holdings": [asdict(h) for h in latest.holdings] if latest else [],
+            "holdings": holdings,
             "changes": [
                 {**c, "pct_change": c["share_change_pct"]}
                 for c in compare_portfolios(snapshots[1], latest)
             ]
-            if len(snapshots) > 1
+            if include_changes and len(snapshots) > 1
             else [],
             "timeline": [
                 {
@@ -273,17 +366,66 @@ class ResearchService:
                 }
                 for s in snapshots[:8]
             ],
-            "notes": [note for note in (
-                *(([latest.notes] if isinstance(latest.notes, str) else latest.notes)
-                  if latest else ["No usable disclosure cached. Refresh is attempted when this profile is opened."]),
-                institution.data_quality_notes,
-                institution.source_notes,
-            ) if note],
+            "notes": [
+                note
+                for note in (
+                    *(
+                        (
+                            [latest.notes]
+                            if isinstance(latest.notes, str)
+                            else latest.notes
+                        )
+                        if latest
+                        else [
+                            "No usable disclosure cached. Refresh is attempted when this profile is opened."
+                        ]
+                    ),
+                    institution.data_quality_notes,
+                    institution.source_notes,
+                )
+                if note
+            ],
             "rationale": "No sourced investor rationale available.",
         }
 
     def investors(self) -> list[dict]:
         return [self.investor(i.id) for i in self.registry.all()]
+
+    def investor_summaries(self) -> list[dict]:
+        summaries, _ = self._investor_summaries_with_snapshots()
+        return summaries
+
+    def _investor_summaries_with_snapshots(
+        self,
+    ) -> tuple[list[dict], dict[str, list[PortfolioSnapshot]]]:
+        institutions = self.registry.all()
+        followed = set(self.store.follows())
+        refresh_ids = [
+            f"{'ark' if institution.id == 'ark' else 'portfolio'}:{institution.id}"
+            for institution in institutions
+        ]
+        refresh_states = self.store.latest_snapshots("refresh", refresh_ids)
+        summaries = []
+        snapshots_by_id = {}
+        for institution in institutions:
+            snapshots = self.portfolios(institution.id, limit=2)
+            snapshots_by_id[institution.id] = snapshots
+            refresh_kind = "ark" if institution.id == "ark" else "portfolio"
+            summaries.append(
+                self.investor(
+                    institution.id,
+                    holdings_limit=3,
+                    include_changes=False,
+                    include_entry_prices=False,
+                    snapshot_limit=2,
+                    _snapshots=snapshots,
+                    _followed=institution.id in followed,
+                    _refresh_state=refresh_states.get(
+                        f"{refresh_kind}:{institution.id}", {}
+                    ),
+                )
+            )
+        return summaries, snapshots_by_id
 
     def portfolio_overlap(
         self, institution_ids: list[str], period: str | None = None
@@ -297,6 +439,280 @@ class ResearchService:
         return analyze_overlap(
             {key: self.portfolios(key) for key in unique_ids}, period=period
         )
+
+    def sector_intelligence(
+        self,
+        institution_ids: list[str] | None = None,
+        period: str | None = None,
+        sector: str | None = None,
+    ) -> dict:
+        requested = list(dict.fromkeys(institution_ids or []))
+        explicit_selection = bool(requested)
+        registry = {institution.id: institution for institution in self.registry.all()}
+        if explicit_selection:
+            missing = [key for key in requested if key not in registry]
+            if missing:
+                raise ValueError("Unknown institution: " + ", ".join(missing))
+        else:
+            # An omitted selection means a complete tracked-manager overview.
+            # Keep managers without saved data visible in coverage rather than
+            # silently dropping them from the requested population.
+            requested = list(registry)
+        if explicit_selection and len(requested) > 10:
+            raise ValueError("Select no more than 10 institutions.")
+        snapshots_by_id = {
+            key: self.portfolios(key)
+            for key in requested
+        }
+        institutions = []
+        unavailable = []
+        for key in requested:
+            snapshots = snapshots_by_id[key]
+            if not snapshots:
+                unavailable.append(key)
+                continue
+            institution = registry.get(key)
+            try:
+                analysis = analyze_sector_exposure(
+                    snapshots,
+                    period=period,
+                    sector=sector,
+                )
+            except ValueError:
+                unavailable.append(key)
+                continue
+            institutions.append(
+                {
+                    **analysis,
+                    "name": institution.name if institution else key,
+                    "investor": institution.investor if institution else "",
+                }
+            )
+        aggregate_rows: dict[str, dict] = {}
+        for analysis in institutions:
+            for allocation in analysis["allocation"]:
+                row = aggregate_rows.setdefault(
+                    allocation["sector"],
+                    {
+                        "sector": allocation["sector"],
+                        "reported_value": 0.0,
+                        "average_weight": 0.0,
+                        "institution_count": 0,
+                        "holding_count": 0,
+                        "position_activity": {
+                            "NEW": 0,
+                            "INCREASED": 0,
+                            "REDUCED": 0,
+                            "EXITED": 0,
+                        },
+                    },
+                )
+                row["reported_value"] += allocation["reported_value"]
+                row["average_weight"] += allocation["weight"]
+                row["institution_count"] += 1
+                row["holding_count"] += allocation["holding_count"]
+            for change in analysis["sector_changes"]:
+                row = aggregate_rows.get(change["sector"])
+                if row is None:
+                    continue
+                for activity in ("NEW", "INCREASED", "REDUCED", "EXITED"):
+                    row["position_activity"][activity] += change[
+                        "position_activity"
+                    ][activity]
+        divisor = len(institutions)
+        aggregate = sorted(
+            aggregate_rows.values(),
+            key=lambda item: (-item["reported_value"], item["sector"]),
+        )
+        for row in aggregate:
+            row["average_weight"] = (
+                row["average_weight"] / divisor if divisor else 0.0
+            )
+        known_value = sum(
+            analysis["coverage"]["classified_reported_value"]
+            for analysis in institutions
+        )
+        total_value = sum(
+            analysis["coverage"]["reported_value_total"]
+            for analysis in institutions
+        )
+        return {
+            "institutions": institutions,
+            "unavailable_institutions": unavailable,
+            "aggregate": aggregate,
+            "coverage": {
+                "institution_count": len(institutions),
+                "requested_institution_count": len(requested),
+                "reported_value_total": total_value,
+                "classified_reported_value": known_value,
+                "classified_value_percentage": known_value / total_value
+                if total_value
+                else 0.0,
+                "unknown_value_percentage": (total_value - known_value) / total_value
+                if total_value
+                else 0.0,
+            },
+            "period_filter": period,
+            "sector_filter": sector,
+            "coverage_notes": [
+                "Each institution uses its latest saved successful snapshot at or before the selected period; reporting dates can differ.",
+                "SEC Form 13F is delayed and partial. Daily fund disclosures, when present, are labeled separately and are not treated as quarterly 13F data.",
+                *(
+                    [
+                        "No usable saved snapshot was available for: "
+                        + ", ".join(unavailable)
+                        + "."
+                    ]
+                    if unavailable
+                    else []
+                ),
+            ],
+            "interpretation_policy": (
+                "Verified allocations and reported share changes are historical. "
+                "They do not establish investment intent. This is not a prediction "
+                "of future purchases."
+            ),
+        }
+
+    def _institution_ids_in_question(self, question: str) -> list[str]:
+        query = question.casefold()
+        aliases = {
+            "buffett": "berkshire",
+            "warren buffett": "berkshire",
+            "ackman": "pershing",
+            "cathie wood": "ark",
+            "wood": "ark",
+            "burry": "scion",
+            "tepper": "appaloosa",
+            "druckenmiller": "duquesne",
+        }
+        selected = [key for alias, key in aliases.items() if alias in query]
+        for institution in self.registry.all():
+            tokens = (institution.id, institution.name.casefold())
+            if any(token and token in query for token in tokens):
+                selected.append(institution.id)
+        return list(dict.fromkeys(selected))
+
+    def _sector_answer(self, question: str) -> dict:
+        selected = self._institution_ids_in_question(question)
+        data = self.sector_intelligence(selected or None)
+        aggregate = data["aggregate"]
+        classified = [row for row in aggregate if row["sector"] != "Unknown"]
+        count = data["coverage"]["institution_count"]
+        if not count:
+            short = (
+                "No saved institutional disclosure is available for sector analysis. "
+                "A verified dated portfolio snapshot is required."
+            )
+        elif classified:
+            leader = classified[0]
+            scope = (
+                data["institutions"][0]["name"]
+                if len(data["institutions"]) == 1
+                else f"{count} institutions with saved disclosures"
+            )
+            coverage = data["coverage"]["classified_value_percentage"]
+            short = (
+                f"Among the {coverage:.1%} of reported value with verified sector "
+                f"classification in the latest comparable saved data for {scope}, "
+                f"{leader['sector']} has the largest combined reported value. "
+                "Unknown classifications remain included in the coverage table. "
+                "This is historical allocation evidence, not a prediction of the next purchase."
+            )
+        else:
+            short = "The saved disclosures contain no sector-classifiable reported positions."
+        accumulation = []
+        reductions = []
+        historical = []
+        for analysis in data["institutions"]:
+            for change in analysis["position_changes"]:
+                security_details = (
+                    [change["security_class"]] if change["security_class"] else []
+                )
+                if change["put_call"]:
+                    security_details.append(change["put_call"])
+                if change["share_type"] and change["share_type"] != "SH":
+                    security_details.append(change["share_type"])
+                security_label = (
+                    f" ({' · '.join(security_details)})"
+                    if any(security_details)
+                    else ""
+                )
+                label = (
+                    f"{analysis['name']} · {change['sector']} · "
+                    f"{change['ticker'] or change['issuer']}{security_label}: "
+                    f"{change['activity'].lower()} "
+                    f"reported shares ({analysis['previous_period']} to "
+                    f"{analysis['reporting_period']})."
+                )
+                if change["activity"] in {"NEW", "INCREASED"}:
+                    accumulation.append(label)
+                elif change["activity"] in {"REDUCED", "EXITED"}:
+                    reductions.append(label)
+            for change in analysis["sector_changes"][:5]:
+                historical.append(
+                    f"{analysis['name']} · {change['sector']}: "
+                    f"{change['weight_change']:+.1%} disclosed weight change."
+                )
+        limitations = [
+            "13F data is delayed and incomplete; it omits many asset classes, short positions, and some hedges.",
+            "A sector-weight change can reflect security-price movement as well as position changes.",
+            "Reported share-count increases are not confirmed purchases; disclosures do not identify transaction dates, prices, rationale, or future intent.",
+            "Unknown classifications remain in coverage and are not silently removed.",
+        ]
+        evidence = [
+            {
+                "text": (
+                    f"{analysis['name']} disclosure for {analysis['reporting_period']} "
+                    f"({analysis['coverage']['classified_value_percentage']:.1%} of reported value classified)."
+                ),
+                "period": analysis["reporting_period"],
+                "source_url": analysis["source_url"],
+                "source_type": analysis["source_type"],
+            }
+            for analysis in data["institutions"]
+        ]
+        classification_sources: dict[str, dict] = {}
+        for analysis in data["institutions"]:
+            for allocation in analysis["allocation"]:
+                for holding in allocation["holdings"]:
+                    source_url = holding["classification_source_url"]
+                    if source_url:
+                        classification_sources[source_url] = {
+                            "text": (
+                                f"{holding['ticker'] or holding['issuer']}: "
+                                f"{holding['taxonomy_code']} mapped to "
+                                f"{holding['sector']} by the ThesisLens public SIC taxonomy."
+                            ),
+                            "period": analysis["reporting_period"],
+                            "source_url": source_url,
+                            "source_type": "SEC submissions identity and SIC",
+                        }
+        evidence.extend(list(classification_sources.values())[:10])
+        if data["institutions"]:
+            evidence.append(
+                {
+                    "text": data["institutions"][0]["taxonomy"],
+                    "period": "",
+                    "source_url": data["institutions"][0][
+                        "taxonomy_source_url"
+                    ],
+                    "source_type": "SEC SIC taxonomy",
+                }
+            )
+        return {
+            "answer": short,
+            "evidence": evidence,
+            "source": "Stored official disclosures · identifier-backed SEC SIC sector taxonomy",
+            "sector_analysis": data,
+            "sector_sections": {
+                "short_answer": short,
+                "accumulation": accumulation[:12],
+                "reductions": reductions[:12],
+                "historical_changes": historical[:20],
+                "limitations": limitations,
+            },
+        }
 
     def chunks(self, ticker: str) -> list[dict]:
         company = self.cached_company(ticker) or {}
@@ -323,6 +739,8 @@ class ResearchService:
             saved_market[0] if saved_market else (data or {}).get("market", {})
         )
         market_state = self.cache_state("market", ticker)
+        market_checks = self.store.snapshots("market_status", ticker)
+        market_check = market_checks[0] if market_checks else {}
         quote_time = market.get("quote_as_of") or (data or {}).get("market_as_of")
         if market.get("price") is not None:
             market["status"] = (
@@ -336,6 +754,33 @@ class ResearchService:
             market["status"] = "unavailable"
         market["quote_as_of"] = quote_time
         market["stale"] = market["status"] == "cached"
+        configured = list(self.config.market_data_providers)
+        if market.get("price") is not None:
+            market_reason = "stale_cache" if market["stale"] else None
+            market_message = (
+                "The latest successful quote is being shown because the most recent provider check failed."
+                if market["stale"]
+                else "Dated market data is available from the identified provider."
+            )
+        elif not configured:
+            market_reason = "not_configured"
+            market_message = "No market-data provider is configured. Filing research remains available."
+        elif market_check.get("error_code") == "provider_unavailable" or market_state.get("error"):
+            market_reason = "provider_unavailable"
+            market_message = "Configured market-data providers did not return a valid quote."
+        else:
+            market_reason = "not_cached"
+            market_message = "No successful market quote has been cached yet."
+        market["availability"] = {
+            "available": market.get("price") is not None,
+            "reason": market_reason,
+            "message": market_message,
+            "configured_providers": configured,
+            "attempts": market_check.get("attempts", []),
+            "checked_at": market_state.get("checked_at"),
+            "ttl_seconds": self.config.market_cache_ttl_seconds,
+        }
+        classification = classify_ticker(ticker)
         radar = []
         for institution in self.investors():
             holdings = [
@@ -356,10 +801,14 @@ class ResearchService:
         if not data:
             failure = str(company_refresh.get("error") or "")
             availability = (
-                "unknown_symbol" if f"Ticker {ticker} was not found in the SEC ticker list" in failure
-                else "missing_filings" if "No supported SEC filings or facts available" in failure
-                else "provider_error" if failure
-                else "loading" if not company_refresh.get("checked_at")
+                "unknown_symbol"
+                if f"Ticker {ticker} was not found in the SEC ticker list" in failure
+                else "missing_filings"
+                if "No supported SEC filings or facts available" in failure
+                else "provider_error"
+                if failure
+                else "loading"
+                if not company_refresh.get("checked_at")
                 else "missing_filings"
             )
             return {
@@ -370,6 +819,7 @@ class ResearchService:
                 "availability_status": availability,
                 "market": market,
                 "market_as_of": quote_time or "",
+                "classification": classification,
                 "metric_context": [],
                 "risk_cards": [],
                 "warnings": [
@@ -389,7 +839,11 @@ class ResearchService:
         annual = financials[-1] if financials else {}
         quarters = []
         facts_payload = {}
-        path = Path(os.getenv("THESISLENS_CACHE_DIR", "data/cache")) / ticker / "companyfacts.json"
+        path = (
+            Path(os.getenv("THESISLENS_CACHE_DIR", "data/cache"))
+            / ticker
+            / "companyfacts.json"
+        )
         if path.exists():
             facts_payload = json.loads(path.read_text(encoding="utf-8"))
             quarters = quarter_facts(facts_payload)
@@ -397,12 +851,7 @@ class ResearchService:
             facts_payload, data.get("filings", []), annual
         )
         chunks = self.chunks(ticker)
-        overview_chunk = next(
-            (chunk for chunk in chunks
-             if "business" in str(chunk.get("section_title", chunk.get("section", ""))).lower()
-             and chunk.get("source_url") and chunk.get("text")),
-            None,
-        )
+        overview = business_overview(chunks)
         suggestions = suggested_theses(data, chunks)
         ignored = self.store.snapshots("ignored_suggestions", ticker)
         ignored_ids = ignored[0].get("ids", []) if ignored else []
@@ -479,17 +928,31 @@ class ResearchService:
             "available": True,
             "identity": identity,
             "availability_status": (
-                "provider_error" if company_refresh.get("error")
-                else "filings_only" if not financials else "ready"
+                "provider_error"
+                if company_refresh.get("error")
+                else "filings_only"
+                if not financials
+                else "ready"
             ),
-            "overview": {
-                "text": overview_chunk["text"][:450],
-                "source_url": overview_chunk["source_url"],
-                "period": overview_chunk.get("period", ""),
-            } if overview_chunk else None,
+            "overview": overview,
+            "overview_fallback": next(
+                (
+                    {
+                        "message": "A parsed Item 1 business overview is not available. Read the original annual filing for authoritative business context.",
+                        "source_url": filing["source_url"],
+                    }
+                    for filing in data.get("filings", [])
+                    if filing.get("form") == "10-K" and filing.get("source_url")
+                ),
+                None,
+            ),
             "filing_timeline": [
-                {"form": filing["form"], "report_date": filing["report_date"],
-                 "filing_date": filing["filing_date"], "source_url": filing["source_url"]}
+                {
+                    "form": filing["form"],
+                    "report_date": filing["report_date"],
+                    "filing_date": filing["filing_date"],
+                    "source_url": filing["source_url"],
+                }
                 for filing in data.get("filings", [])[:8]
             ],
             "name": (
@@ -499,6 +962,7 @@ class ResearchService:
             ),
             "market": market,
             "market_as_of": quote_time or "",
+            "classification": classification,
             "annual": annual,
             "metric_context": comparisons(financials)
             if period_context["kind"] == "annual"
@@ -553,24 +1017,32 @@ class ResearchService:
         return {**thesis, **result, "history": self.store.history(thesis["id"])}
 
     def home(self) -> dict:
-        investors = self.investors()
+        investors, snapshots_by_id = self._investor_summaries_with_snapshots()
         activity = []
         company_holders: dict[str, list[dict]] = {}
         for investor in investors:
-            for change in investor["changes"]:
+            snapshots = snapshots_by_id[investor["id"]]
+            latest = snapshots[0] if snapshots else None
+            changes = (
+                compare_portfolios(snapshots[1], latest)
+                if len(snapshots) > 1
+                else []
+            )
+            for change in changes:
                 if change["activity"] != "UNCHANGED":
                     activity.append(
                         {
                             **change,
+                            "pct_change": change["share_change_pct"],
                             "institution": investor["name"],
                             "institution_id": investor["id"],
                             "source_type": investor["source_type"],
                             "freshness": investor["freshness"],
                         }
                     )
-            for holding in investor["holdings"]:
-                if holding["ticker"] and not holding["put_call"]:
-                    company_holders.setdefault(holding["ticker"], []).append(investor)
+            for holding in latest.holdings if latest else []:
+                if holding.ticker and not holding.put_call:
+                    company_holders.setdefault(holding.ticker, []).append(investor)
         activity.sort(
             key=lambda r: (r.get("filing_date", ""), bool(r.get("ticker"))),
             reverse=True,
@@ -603,6 +1075,7 @@ class ResearchService:
                 }
             )
         watchlist = []
+        market_overview = []
         for ticker in self.store.watchlist():
             theses = self.store.theses(ticker)
             watchlist.append(
@@ -613,6 +1086,32 @@ class ResearchService:
                         t["status"] in {"WEAKENED", "UNCERTAIN"} for t in theses
                     ),
                     "available": bool(self.cached_company(ticker)),
+                }
+            )
+            saved = self.store.snapshots("market", ticker)
+            quote = saved[0] if saved else {}
+            price = quote.get("price")
+            previous = quote.get("previous_close")
+            change = (
+                (price - previous) / previous
+                if isinstance(price, (int, float))
+                and isinstance(previous, (int, float))
+                and previous > 0
+                else None
+            )
+            market_overview.append(
+                {
+                    "ticker": ticker,
+                    "price": price,
+                    "previous_close": previous,
+                    "change": change,
+                    "currency": quote.get("currency", "USD"),
+                    "quote_as_of": quote.get("quote_as_of"),
+                    "provider": quote.get("provider"),
+                    "source_url": quote.get("source_url"),
+                    "status": quote.get("status", "unavailable") if price else "unavailable",
+                    "available": price is not None,
+                    "missing_reason": None if price is not None else "No successful saved quote",
                 }
             )
         disclosures = []
@@ -631,27 +1130,213 @@ class ResearchService:
             "activity": activity[:12],
             "ideas": ideas,
             "watchlist": watchlist,
+            "market_overview": market_overview,
             "investors": investors,
             "recent_disclosures": disclosures[:8],
             "freshness_policy": REFRESH_SECONDS,
             "as_of": utc_now(),
         }
 
-    def ask(self, question: str, ticker: str) -> dict:
-        if re.search(r"\b(public updates?|official updates?|latest (?:insider|institutional) (?:activity|filings?))\b", question, re.IGNORECASE):
-            category = "insiders" if re.search(r"\binsider\b", question, re.IGNORECASE) else (
-                "institutions" if re.search(r"\binstitutional\b", question, re.IGNORECASE) else "public_updates"
+    def ask(
+        self,
+        question: str,
+        ticker: str | None = None,
+        mode: str = "auto",
+        *,
+        route: AskRoute | None = None,
+        request_id: str = "unavailable",
+    ) -> dict:
+        route = route or route_ask(question, mode, ticker)
+        metadata = {
+            "intent": route.intent.value,
+            "mode": mode,
+            "configuration_error": None,
+            "configuration_error_code": None,
+            "privacy": "No private workspace data was sent to an external model.",
+        }
+        if route.intent is AskIntent.GENERAL:
+            started = time.perf_counter()
+            try:
+                result = generate_general_answer(
+                    question,
+                    self.config.ollama_model,
+                    self.config.ollama_base_url,
+                    self.config.allow_remote_llm,
+                    self.config.ollama_readiness_timeout,
+                    self.config.ollama_inference_timeout,
+                    self.config.ollama_readiness_retries,
+                )
+            except Exception as exc:  # noqa: BLE001 - isolate the local model boundary.
+                logging.getLogger("thesislens.ask").error(
+                    "general_ai_provider_failed request_id=%s routed_intent=%s "
+                    "duration_ms=%.1f exception_type=%s",
+                    request_id,
+                    route.intent.value,
+                    (time.perf_counter() - started) * 1000,
+                    type(exc).__name__,
+                )
+                return {
+                    **metadata,
+                    "answer": "The local Ollama request failed temporarily. Retry in a moment.",
+                    "evidence": [],
+                    "source": "Local General AI runtime",
+                    "configuration_error": (
+                        "The local Ollama request failed temporarily. Retry in a moment."
+                    ),
+                    "configuration_error_code": "ollama_temporary_error",
+                }
+            if not result.available:
+                logging.getLogger("thesislens.ask").warning(
+                    "general_ai_unavailable request_id=%s routed_intent=%s "
+                    "duration_ms=%.1f exception_type=%s error_code=%s",
+                    request_id,
+                    route.intent.value,
+                    (time.perf_counter() - started) * 1000,
+                    result.exception_type or "ControlledFailure",
+                    result.error_code or "ollama_unavailable",
+                )
+                return {
+                    **metadata,
+                    "answer": result.error or "General AI is unavailable.",
+                    "evidence": [],
+                    "source": "General AI configuration",
+                    "configuration_error": result.error,
+                    "configuration_error_code": result.error_code,
+                }
+            privacy = (
+                "The question was sent to an explicitly enabled configured LLM endpoint; "
+                "no portfolio, filing, watchlist, or database content was included."
+                if self.config.allow_remote_llm
+                else "The question was sent only to the configured local Ollama service; "
+                "no portfolio, filing, watchlist, or database content was included."
+            )
+            return {
+                **metadata,
+                "answer": result.answer or "",
+                "evidence": [],
+                "source": f"General AI · {self.config.ollama_model}",
+                "privacy": privacy,
+            }
+        if route.intent is AskIntent.UNSUPPORTED:
+            return {
+                **metadata,
+                "answer": (
+                    "This request is unavailable in the selected mode. ThesisLens cannot "
+                    "access private accounts or execute transactions. For a general topic, "
+                    "switch to General mode; for research, name a company, filing, or investor."
+                ),
+                "evidence": [],
+                "source": "Intent and privacy guard",
+            }
+        if route.intent is AskIntent.CURRENT_PUBLIC_INFORMATION:
+            result = self.market_pulse.answer(question, route.ticker or "")
+            return {**result, **metadata}
+        if route.intent is AskIntent.INSTITUTIONAL_SECTOR_ANALYSIS:
+            return {**self._sector_answer(question), **metadata}
+        if route.intent is AskIntent.PORTFOLIO_ANALYSIS and not route.ticker:
+            return {**self._portfolio_overview(question), **metadata}
+        if not route.ticker:
+            return {
+                **metadata,
+                "answer": (
+                    "A verified company context is required for financial research. "
+                    "Include a ticker such as AAPL or select Auto/General for a general question."
+                ),
+                "evidence": [],
+                "source": "Research context guard",
+            }
+        return {**self._ask_research(question, route.ticker), **metadata}
+
+    def _portfolio_overview(self, question: str) -> dict:
+        query = question.lower()
+        aliases = {
+            "buffett": "berkshire",
+            "ackman": "pershing",
+            "wood": "ark",
+            "burry": "scion",
+            "tepper": "appaloosa",
+            "druckenmiller": "duquesne",
+        }
+        selected = [
+            item.id
+            for item in self.registry.all()
+            if re.search(r"\b" + re.escape(item.id) + r"\b", query)
+            or any(alias in query and item.id == key for alias, key in aliases.items())
+        ]
+        selected = list(dict.fromkeys(selected))
+        if len(selected) >= 2:
+            data = self.portfolio_overlap(selected[:5])
+            summary = data["summary"]
+            jaccard = (
+                f"{summary['jaccard']:.1%}" if summary["jaccard"] is not None else "N/A"
+            )
+            answer = (
+                f"The selected disclosures contain {summary['shared_count']} security "
+                f"identity/identities held by at least two managers and "
+                f"{summary['common_count']} common to every selected manager. "
+                f"Jaccard similarity is {jaccard}. This describes reported overlap, "
+                "not shared intent."
+            )
+            evidence = [
+                {
+                    "text": f"{row['name']}: {row['holding_count']} disclosed holdings; "
+                    f"reporting period {row.get('reporting_period', 'unavailable')}.",
+                    "period": row.get("reporting_period", ""),
+                    "source_url": row.get("source_url", ""),
+                }
+                for row in data["institutions"]
+            ]
+            return {
+                "answer": answer,
+                "evidence": evidence,
+                "source": "Verified class-aware disclosure overlap",
+            }
+        return {
+            "answer": (
+                "Name two to five supported institutions to compare, or include a verified "
+                "ticker to inspect a disclosed position."
+            ),
+            "evidence": [],
+            "source": "Institutional portfolio routing",
+        }
+
+    def _ask_research(self, question: str, ticker: str) -> dict:
+        if re.search(
+            r"\b(public updates?|official updates?|latest (?:insider|institutional) (?:activity|filings?))\b",
+            question,
+            re.IGNORECASE,
+        ):
+            category = (
+                "insiders"
+                if re.search(r"\binsider\b", question, re.IGNORECASE)
+                else (
+                    "institutions"
+                    if re.search(r"\binstitutional\b", question, re.IGNORECASE)
+                    else "public_updates"
+                )
             )
             events = self.intelligence.feed(category, 20)["events"]
             ticker_events = [event for event in events if event["ticker"] == ticker]
             selected = (ticker_events or events)[:5]
-            evidence = [{"text": f"{event['headline']} Filed/published {event['published_at'][:10]}"
-                         + (f"; reporting period {event['reporting_period']}" if event["reporting_period"] else ""),
-                         "source_url": event["source_url"], "period": event["reporting_period"] or event["published_at"][:10]}
-                        for event in selected]
-            return {"answer": "\n\n".join(item["text"] for item in evidence)
-                    or "No matching dated official event is cached. This is not evidence of no real-world activity.",
-                    "evidence": evidence, "source": "Deterministic public-source event lookup"}
+            evidence = [
+                {
+                    "text": f"{event['headline']} Filed/published {event['published_at'][:10]}"
+                    + (
+                        f"; reporting period {event['reporting_period']}"
+                        if event["reporting_period"]
+                        else ""
+                    ),
+                    "source_url": event["source_url"],
+                    "period": event["reporting_period"] or event["published_at"][:10],
+                }
+                for event in selected
+            ]
+            return {
+                "answer": "\n\n".join(item["text"] for item in evidence)
+                or "No matching dated official event is cached. This is not evidence of no real-world activity.",
+                "evidence": evidence,
+                "source": "Deterministic public-source event lookup",
+            }
         symbols = re.findall(r"\b[A-Z][A-Z0-9.-]{0,11}\b", question)
         target = next(
             (

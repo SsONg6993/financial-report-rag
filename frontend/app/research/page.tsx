@@ -1,4 +1,8 @@
 import { SearchBox } from "@/components/research-ui";
+import {
+  exploreNavigation,
+  SectionNavigation,
+} from "@/components/section-navigation";
 import Link from "next/link";
 export default function Research() {
   return (
@@ -16,6 +20,11 @@ export default function Research() {
         </p>
         <SearchBox />
       </div>
+      <SectionNavigation
+        active="/research"
+        ariaLabel="Explore sections"
+        items={exploreNavigation}
+      />
       <div className="grid-cards mt-8">
         {[
           ["AAPL", "Apple"],
