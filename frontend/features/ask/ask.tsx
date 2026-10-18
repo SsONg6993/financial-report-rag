@@ -1,30 +1,49 @@
 "use client";
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { api, answerSchema } from "@/lib/api";
+import { api, answerSchema, money, percent } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { MutationError, Sources } from "@/components/research-ui";
+import { staticListKey } from "./list-key";
 import {
   ArrowUp,
   BookOpenCheck,
   MessageCircleQuestion,
   Search,
   ShieldCheck,
+  Sparkles,
 } from "lucide-react";
+type AskMode = "auto" | "general" | "research";
 const examples = [
+  "How do you think medical AI will develop in the future?",
+  "Which sectors are institutional investors buying?",
   "Which recent news may affect my watchlist?",
   "Why did Berkshire reduce AAPL?",
   "Which investors I follow disclose GOOGL?",
-  "What changed in AAPL’s latest quarter?",
+  "What changed in UNH’s latest filing?",
   "What idea should I track for NVDA?",
 ];
+const generalErrorTitle = (code?: string | null) => {
+  if (code === "ollama_service_not_running")
+    return "Ollama service is not running";
+  if (code === "ollama_model_missing") return "Ollama model is missing";
+  if (code === "ollama_timeout") return "Ollama response timed out";
+  if (code === "ollama_loading") return "Ollama model is loading";
+  if (code === "ollama_invalid_response")
+    return "Ollama returned an invalid response";
+  if (code === "ollama_temporary_error")
+    return "Local AI request failed temporarily";
+  if (code === "remote_llm_disabled") return "Remote LLM access is disabled";
+  return "General AI configuration error";
+};
 export function AskResearch() {
   const [question, setQuestion] = useState("");
+  const [mode, setMode] = useState<AskMode>("auto");
   const m = useMutation({
     mutationFn: () =>
       api("/ask", answerSchema, {
         method: "POST",
-        body: JSON.stringify({ question, ticker: "AAPL" }),
+        body: JSON.stringify({ question, mode }),
       }),
   });
   return (
@@ -36,6 +55,26 @@ export function AskResearch() {
           m.mutate();
         }}
       >
+        <fieldset className="mb-4 flex flex-wrap items-center gap-2 border-b border-border/70 pb-4">
+          <legend className="mb-2 w-full text-xs font-semibold uppercase tracking-[0.12em] muted">
+            Answer mode
+          </legend>
+          {(["auto", "general", "research"] as AskMode[]).map((item) => (
+            <button
+              key={item}
+              type="button"
+              aria-pressed={mode === item}
+              className={`min-h-10 rounded-xl border px-4 text-sm capitalize transition ${mode === item ? "border-primary bg-primary/15 text-primary" : "border-border bg-background/40 muted"}`}
+              onClick={() => setMode(item)}
+            >
+              {item}
+            </button>
+          ))}
+          <span className="source !mt-0 sm:ml-2">
+            Auto routes locally. General never receives portfolio or filing
+            context.
+          </span>
+        </fieldset>
         <div className="flex gap-3">
           <span className="icon-shell mt-1 hidden shrink-0 sm:inline-flex">
             <MessageCircleQuestion size={18} aria-hidden />
@@ -61,7 +100,9 @@ export function AskResearch() {
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-border/70 pt-3">
           <p className="flex items-center gap-1.5 text-xs muted">
             <ShieldCheck size={14} className="text-primary" aria-hidden />
-            Grounded in dated local evidence.
+            {mode === "general"
+              ? "General AI uses only your question and configured model."
+              : "Financial answers stay grounded in dated local evidence."}
           </p>
           <Button
             type="submit"
@@ -97,11 +138,129 @@ export function AskResearch() {
               <BookOpenCheck size={18} aria-hidden />
             </span>
             <div>
-              <p className="eyebrow">Research response</p>
-              <h2 className="mt-1">What the evidence supports</h2>
+              <p className="eyebrow">{m.data.intent.replaceAll("_", " ")}</p>
+              <h2 className="mt-1">
+                {m.data.intent === "general"
+                  ? "General AI response"
+                  : "What the evidence supports"}
+              </h2>
             </div>
           </div>
-          {m.data.sections ? (
+          {m.data.sector_sections && m.data.sector_analysis ? (
+            <div className="mt-6 space-y-7">
+              <section>
+                <h3>Short Answer</h3>
+                <p className="mt-2 leading-7">
+                  {m.data.sector_sections.short_answer}
+                </p>
+                <p className="source">
+                  Verified historical disclosure · analytical interpretation is
+                  not a prediction
+                </p>
+              </section>
+              <section>
+                <h3>Sector Allocation Table</h3>
+                <div className="mt-3 overflow-x-auto rounded-xl border border-border">
+                  <table className="w-full min-w-[620px] text-left text-sm">
+                    <thead className="border-b border-border bg-background/40 text-xs uppercase tracking-wider muted">
+                      <tr>
+                        <th className="p-3">Sector</th>
+                        <th className="p-3">Avg. disclosed weight</th>
+                        <th className="p-3">Reported value</th>
+                        <th className="p-3">Institutions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {m.data.sector_analysis.aggregate.map((row) => (
+                        <tr
+                          className="border-b border-border/60"
+                          key={row.sector}
+                        >
+                          <td className="p-3 font-medium">{row.sector}</td>
+                          <td className="p-3 font-mono">
+                            {percent(row.average_weight)}
+                          </td>
+                          <td className="p-3 font-mono">
+                            {money(row.reported_value)}
+                          </td>
+                          <td className="p-3">{row.institution_count}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="source">
+                  Unknown classifications are included · classified value
+                  coverage{" "}
+                  {percent(
+                    m.data.sector_analysis.coverage.classified_value_percentage,
+                  )}
+                </p>
+              </section>
+              <section>
+                <h3>Reported Accumulation / Reduction</h3>
+                <div className="mt-2 grid gap-4 sm:grid-cols-2">
+                  <div className="rounded-xl border border-border p-4">
+                    <p className="font-medium">Accumulation signals</p>
+                    {(m.data.sector_sections.accumulation.length
+                      ? m.data.sector_sections.accumulation
+                      : ["No comparable reported share increases available."]
+                    ).map((item, index) => (
+                      <p
+                        className="mt-2 text-sm muted"
+                        key={staticListKey("accumulation", item, index)}
+                      >
+                        {item}
+                      </p>
+                    ))}
+                  </div>
+                  <div className="rounded-xl border border-border p-4">
+                    <p className="font-medium">Reduction signals</p>
+                    {(m.data.sector_sections.reductions.length
+                      ? m.data.sector_sections.reductions
+                      : ["No comparable reported share reductions available."]
+                    ).map((item, index) => (
+                      <p
+                        className="mt-2 text-sm muted"
+                        key={staticListKey("reductions", item, index)}
+                      >
+                        {item}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              </section>
+              <section>
+                <h3>Historical Changes</h3>
+                <div className="mt-2 space-y-2">
+                  {(m.data.sector_sections.historical_changes.length
+                    ? m.data.sector_sections.historical_changes
+                    : ["A second comparable disclosure is not available."]
+                  ).map((item, index) => (
+                    <p
+                      className="text-sm muted"
+                      key={staticListKey("historical", item, index)}
+                    >
+                      {item}
+                    </p>
+                  ))}
+                </div>
+              </section>
+              <section>
+                <h3>What the Data Does Not Tell Us</h3>
+                <div className="mt-2 space-y-2">
+                  {m.data.sector_sections.limitations.map((item, index) => (
+                    <p
+                      className="text-sm muted"
+                      key={staticListKey("limitations", item, index)}
+                    >
+                      {item}
+                    </p>
+                  ))}
+                </div>
+              </section>
+            </div>
+          ) : m.data.sections ? (
             <div className="mt-6 space-y-6">
               <section>
                 <h3>Short Answer</h3>
@@ -123,7 +282,7 @@ export function AskResearch() {
                       (items as string[]).map((item, index) => (
                         <p
                           className={`text-sm leading-6 whitespace-pre-line ${title === "Numbers That Matter" ? "rounded-xl border border-border p-4 font-medium" : "muted"}`}
-                          key={index}
+                          key={staticListKey(String(title), item, index)}
                         >
                           {item}
                         </p>
@@ -148,7 +307,7 @@ export function AskResearch() {
                   <div className="mt-2 space-y-2">
                     {m.data.sections.annual_context.map((item, index) => (
                       <p
-                        key={index}
+                        key={staticListKey("annual-context", item, index)}
                         className="text-sm muted whitespace-pre-line"
                       >
                         {item}
@@ -163,12 +322,36 @@ export function AskResearch() {
               {m.data.answer}
             </p>
           )}
-          <details className="mt-5">
-            <summary className="text-sm text-primary">
-              Sources &amp; evidence ({m.data.evidence.length})
-            </summary>
-            <Sources evidence={m.data.evidence} />
-          </details>
+          {m.data.configuration_error && (
+            <div className="empty mt-5 text-left" role="alert">
+              <strong>
+                {generalErrorTitle(m.data.configuration_error_code)}
+              </strong>
+              <p className="mt-2 text-sm">{m.data.configuration_error}</p>
+              {m.data.request_id && (
+                <p className="source">Reference: {m.data.request_id}</p>
+              )}
+            </div>
+          )}
+          {m.data.evidence.length > 0 && (
+            <details className="mt-5">
+              <summary className="text-sm text-primary">
+                {m.data.intent === "institutional_sector_analysis"
+                  ? "Source Citations"
+                  : "Sources & evidence"}{" "}
+                ({m.data.evidence.length})
+              </summary>
+              <Sources evidence={m.data.evidence} />
+            </details>
+          )}
+          <p className="mt-5 flex items-start gap-2 text-xs muted">
+            <Sparkles
+              size={14}
+              className="mt-0.5 shrink-0 text-primary"
+              aria-hidden
+            />
+            {m.data.privacy}
+          </p>
           <p className="source">{m.data.source}</p>
         </article>
       )}

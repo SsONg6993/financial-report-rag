@@ -1,3 +1,4 @@
+import requests
 from requests import ConnectionError
 
 from src.decision import (
@@ -7,7 +8,7 @@ from src.decision import (
     OllamaDecisionProvider,
 )
 from src.hybrid import reciprocal_rank_fusion
-from src.llm import GenerationResult, generate_answer
+from src.llm import GenerationResult, generate_answer, generate_general_answer
 from src.router import QueryIntent, route_query
 
 
@@ -31,9 +32,15 @@ def test_rrf_uses_ranks_and_preserves_backend_scores():
 
 def test_query_router_prefers_deterministic_tools():
     assert route_query("What was revenue in 2025?") is QueryIntent.METRIC_LOOKUP
-    assert route_query("What was revenue CAGR from 2022 to 2025?") is QueryIntent.CALCULATION
+    assert (
+        route_query("What was revenue CAGR from 2022 to 2025?")
+        is QueryIntent.CALCULATION
+    )
     assert route_query("Why did Services revenue grow?") is QueryIntent.FILING_RAG
-    assert route_query("Compare Apple and Microsoft margins") is QueryIntent.PEER_COMPARISON
+    assert (
+        route_query("Compare Apple and Microsoft margins")
+        is QueryIntent.PEER_COMPARISON
+    )
     assert route_query("Estimate a DCF value") is QueryIntent.VALUATION
     assert route_query("Classify the cybersecurity risks") is QueryIntent.RISK_ANALYSIS
 
@@ -139,7 +146,9 @@ def test_reranker_failure_retains_fused_or_backend_results():
         def rerank(self, query, hits, top_k):
             raise RuntimeError("device failure")
 
-    search = FilingSearch(Dense(), "collection", [{"chunk_id": "a", "text": "revenue grew"}])
+    search = FilingSearch(
+        Dense(), "collection", [{"chunk_id": "a", "text": "revenue grew"}]
+    )
     hits = search.search("revenue", mode="BM25", reranker=BrokenReranker(), top_k=1)
 
     assert hits[0]["chunk_id"] == "a"
@@ -152,8 +161,181 @@ def test_ollama_connection_failure_returns_retrieval_only_result(monkeypatch):
     monkeypatch.setattr("src.llm.requests.post", fail)
     result = generate_answer(
         "What changed?",
-        [{"chunk_id": "A-1", "section": "Item 7", "score": 1.0, "text": "Revenue grew."}],
+        [
+            {
+                "chunk_id": "A-1",
+                "section": "Item 7",
+                "score": 1.0,
+                "text": "Revenue grew.",
+            }
+        ],
         "llama3.2",
     )
 
-    assert result == GenerationResult(answer=None, available=False, error="Ollama is unavailable.")
+    assert result == GenerationResult(
+        answer=None, available=False, error="Ollama is unavailable."
+    )
+
+
+def test_general_llm_reports_service_not_running(monkeypatch):
+    def offline(*_args, **_kwargs):
+        raise requests.ConnectionError("refused")
+
+    monkeypatch.setattr("src.llm.requests.get", offline)
+    result = generate_general_answer("Explain medical AI", "qwen3:4b")
+    assert not result.available
+    assert "service is not running" in result.error
+    assert result.error_code == "ollama_service_not_running"
+
+
+def test_general_llm_reports_missing_local_model(monkeypatch):
+    class Tags:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"models": [{"name": "llama3.2:latest"}]}
+
+    monkeypatch.setattr("src.llm.requests.get", lambda *_args, **_kwargs: Tags())
+    result = generate_general_answer("Explain medical AI", "qwen3:4b")
+    assert not result.available
+    assert "qwen3:4b" in result.error
+    assert "not installed locally" in result.error
+    assert result.error_code == "ollama_model_missing"
+
+
+def test_general_llm_rejects_malformed_model_list_without_raising(monkeypatch):
+    class Tags:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return []
+
+    monkeypatch.setattr("src.llm.requests.get", lambda *_args, **_kwargs: Tags())
+
+    result = generate_general_answer("Explain medical AI", "qwen3:4b")
+
+    assert not result.available
+    assert result.error_code == "ollama_invalid_response"
+    assert result.exception_type == "TypeError"
+
+
+def test_general_llm_reports_model_loading_without_restarting(monkeypatch):
+    response = requests.Response()
+    response.status_code = 503
+
+    def loading(*_args, **_kwargs):
+        raise requests.HTTPError(response=response)
+
+    monkeypatch.setattr("src.llm.requests.get", loading)
+    result = generate_general_answer(
+        "Explain medical AI", "qwen3:4b", readiness_retries=0
+    )
+    assert not result.available
+    assert result.error_code == "ollama_loading"
+
+
+def test_general_llm_inference_timeout_is_not_retried_or_restarted(monkeypatch):
+    class Tags:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"models": [{"name": "qwen3:4b"}]}
+
+    calls = 0
+
+    def timeout(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise requests.Timeout("synthetic inference timeout")
+
+    monkeypatch.setattr("src.llm.requests.get", lambda *_args, **_kwargs: Tags())
+    monkeypatch.setattr("src.llm.requests.post", timeout)
+    result = generate_general_answer(
+        "Explain medical AI", "qwen3:4b", inference_timeout=5
+    )
+    assert not result.available
+    assert result.error_code == "ollama_timeout"
+    assert calls == 1
+
+
+def test_general_llm_rejects_null_response_without_raising(monkeypatch):
+    class Tags:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"models": [{"name": "qwen3:4b"}]}
+
+    class InvalidGeneration:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"response": None}
+
+    monkeypatch.setattr("src.llm.requests.get", lambda *_args, **_kwargs: Tags())
+    monkeypatch.setattr(
+        "src.llm.requests.post", lambda *_args, **_kwargs: InvalidGeneration()
+    )
+
+    result = generate_general_answer("Explain medical AI", "qwen3:4b")
+
+    assert not result.available
+    assert result.error_code == "ollama_invalid_response"
+    assert result.exception_type == "InvalidResponse"
+
+
+def test_general_llm_reports_temporary_inference_transport_error(monkeypatch):
+    class Tags:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"models": [{"name": "qwen3:4b"}]}
+
+    monkeypatch.setattr("src.llm.requests.get", lambda *_args, **_kwargs: Tags())
+    monkeypatch.setattr(
+        "src.llm.requests.post",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            requests.exceptions.ChunkedEncodingError("truncated local response")
+        ),
+    )
+
+    result = generate_general_answer("Explain medical AI", "qwen3:4b")
+
+    assert not result.available
+    assert result.error_code == "ollama_temporary_error"
+    assert result.exception_type == "ChunkedEncodingError"
+
+
+def test_general_llm_uses_only_question_with_installed_model(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "models": [{"name": "qwen3:4b"}],
+                "response": "Medical AI will depend on clinical validation.",
+            }
+
+    payload = {}
+
+    def generate(*_args, **kwargs):
+        payload.update(kwargs["json"])
+        return Response()
+
+    monkeypatch.setattr("src.llm.requests.get", lambda *_args, **_kwargs: Response())
+    monkeypatch.setattr("src.llm.requests.post", generate)
+    result = generate_general_answer(
+        "How will medical AI develop in the future?", "qwen3:4b"
+    )
+    assert result.available
+    assert "Medical AI" in result.answer
+    assert "AAPL" not in result.answer
+    assert payload["keep_alive"] == "30s"
+    assert "directly and concisely" in payload["prompt"]
+    assert "Do not add citations" in payload["prompt"]
