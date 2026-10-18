@@ -8,10 +8,60 @@ from backend.disclosures import parse_form4, parse_ownership
 from backend.quarterly import quarter_facts, quarterly_changes
 from backend.service import ResearchService
 from backend.tickers import cover_class_tickers
-from src.local_store import LocalStore
+from src.company_directory import CompanyIdentity
+from src.llm import GenerationResult
+from src.local_store import LocalStore, utc_now
 from src.models import AnnualFinancials
-from src.portfolios import Holding, PortfolioSnapshot
+from src.portfolios import INSTITUTIONS, Holding, PortfolioSnapshot
 from src.thesis import serialize_financials
+
+
+def test_company_identity_api_contract(client, monkeypatch):
+    entries = [
+        CompanyIdentity("TSLA", 1318605, "Tesla, Inc.", "Nasdaq"),
+        CompanyIdentity("KEYS", 1601046, "Keysight Technologies, Inc.", "NYSE"),
+    ]
+    monkeypatch.setattr(
+        main.company_directory,
+        "load",
+        lambda refresh=False: (
+            entries,
+            {"checked_at": "2026-10-09T00:00:00+00:00", "stale": False, "error": None},
+        ),
+    )
+    suggestions = client.get("/api/companies/search", params={"q": "keysight"})
+    assert suggestions.status_code == 200
+    assert suggestions.json()["results"][0]["ticker"] == "KEYS"
+    resolved = client.get("/api/companies/resolve", params={"q": "Tesla"})
+    assert resolved.status_code == 200
+    assert resolved.json()["company"]["ticker"] == "TSLA"
+    unknown = client.get("/api/companies/resolve", params={"q": "INVALIDCO"})
+    assert unknown.json()["status"] == "unknown"
+
+
+def test_direct_company_page_distinguishes_unknown_symbol_from_provider_error(client):
+    for ticker, error, expected in (
+        (
+            "TESLA",
+            "RuntimeError: SEC filing list unavailable: Ticker TESLA was not found in the SEC ticker list.",
+            "unknown_symbol",
+        ),
+        ("KEYS", "Timeout: SEC temporarily unavailable", "provider_error"),
+        (
+            "EMPTY",
+            "RuntimeError: No supported SEC filings or facts available",
+            "missing_filings",
+        ),
+    ):
+        main.service.store.save_snapshot(
+            "refresh",
+            f"company:{ticker}",
+            "current",
+            {"checked_at": utc_now(), "error": error, "warnings": []},
+        )
+        response = client.get(f"/api/company/{ticker}")
+        assert response.status_code == 200
+        assert response.json()["availability_status"] == expected
 
 
 @pytest.fixture
@@ -80,7 +130,16 @@ def test_feed_source_dates_and_valid_share_change(client):
     assert data["activity"][0]["pct_change"] == -0.1
     assert data["activity"][0]["reporting_period"] == "2025-06-30"
     assert data["activity"][0]["filing_date"] == "2025-08-14"
-    assert len(data["investors"]) == 10
+    assert len(data["investors"]) == len(INSTITUTIONS)
+
+
+def test_investor_collection_summary_is_bounded(client):
+    response = client.get("/api/investors/summaries")
+    assert response.status_code == 200
+    summaries = response.json()
+    assert len(summaries) == len(INSTITUTIONS)
+    assert all(len(item["holdings"]) <= 3 for item in summaries)
+    assert all(item["changes"] == [] for item in summaries)
 
 
 def test_missing_sources_are_not_filled(client):
@@ -89,6 +148,200 @@ def test_missing_sources_are_not_filled(client):
     assert company["available"] is False
     assert company["suggestions"] == []
     assert client.get("/api/insiders/AAPL").json()["available"] is False
+
+
+def test_portfolio_overlap_api_uses_stored_class_aware_disclosures(client):
+    snapshot = PortfolioSnapshot(
+        "pershing",
+        "2025-06-30",
+        "2025-08-14",
+        "https://www.sec.gov/pershing-fixture",
+        "pershing-2025-06-30",
+        holdings=[
+            Holding(
+                "APPLE INC",
+                "COM",
+                "037833100",
+                50,
+                500,
+                ticker="AAPL",
+                weight=1,
+            )
+        ],
+    )
+    main.service.store.save_snapshot(
+        "portfolio", "pershing", snapshot.reporting_period, snapshot.to_dict()
+    )
+    response = client.get(
+        "/api/portfolio-overlap",
+        params=[("investors", "berkshire"), ("investors", "pershing")],
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["summary"]["common_count"] == 1
+    assert data["summary"]["jaccard"] == 1
+    assert data["securities"][0]["cusip"] == "037833100"
+    assert data["institutions"][0]["source_url"].startswith("https://www.sec.gov/")
+
+
+def test_portfolio_overlap_api_rejects_invalid_selection(client):
+    assert (
+        client.get(
+            "/api/portfolio-overlap", params={"investors": "berkshire"}
+        ).status_code
+        == 422
+    )
+
+
+def test_sector_intelligence_api_and_ask_use_saved_disclosures(client):
+    response = client.get(
+        "/api/sector-intelligence", params={"investors": "berkshire"}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["institutions"][0]["reporting_period"] == "2025-06-30"
+    assert data["institutions"][0]["allocation"][0]["sector"] == (
+        "Information Technology"
+    )
+    assert data["coverage"]["unknown_value_percentage"] == 0
+
+    answer = client.post(
+        "/api/ask",
+        json={"question": "Which sectors does Warren Buffett favor?", "mode": "auto"},
+    )
+    assert answer.status_code == 200
+    payload = answer.json()
+    assert payload["intent"] == "institutional_sector_analysis"
+    assert payload["sector_analysis"]["institutions"][0]["institution_id"] == (
+        "berkshire"
+    )
+    assert "Revenue" not in payload["answer"]
+    assert "free cash flow" not in payload["answer"].lower()
+
+
+def test_auto_sector_overview_includes_more_than_ten_available_managers(client):
+    for institution in INSTITUTIONS[1:12]:
+        snapshot = PortfolioSnapshot(
+            institution.id,
+            "2025-06-30",
+            "2025-08-14",
+            f"https://www.sec.gov/{institution.id}-fixture",
+            f"{institution.id}-2025-06-30",
+            holdings=[
+                Holding(
+                    "APPLE INC",
+                    "COM",
+                    "037833100",
+                    100,
+                    1_000,
+                    ticker="AAPL",
+                    weight=1,
+                )
+            ],
+        )
+        main.service.store.save_snapshot(
+            "portfolio", institution.id, snapshot.reporting_period, snapshot.to_dict()
+        )
+
+    response = client.post(
+        "/api/ask",
+        json={
+            "question": "Which sectors are institutional investors buying?",
+            "mode": "auto",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "institutional_sector_analysis"
+    assert payload["sector_analysis"]["coverage"]["institution_count"] == 12
+    assert payload["sector_analysis"]["coverage"][
+        "requested_institution_count"
+    ] == len(INSTITUTIONS)
+    assert payload["sector_analysis"]["institutions"][0][
+        "reporting_period"
+    ] == "2025-06-30"
+    assert payload["sector_analysis"]["coverage"][
+        "classified_value_percentage"
+    ] == 1
+    assert "verified sector classification" in payload["answer"]
+    assert "Unknown has the largest" not in payload["answer"]
+    assert "not confirmed purchases" in " ".join(
+        payload["sector_sections"]["limitations"]
+    )
+
+
+def test_sector_explicit_comparison_limit_and_named_manager(client):
+    too_many = client.get(
+        "/api/sector-intelligence",
+        params=[("investors", item.id) for item in INSTITUTIONS[:11]],
+    )
+    assert too_many.status_code == 422
+    assert "no more than 10" in too_many.json()["detail"]
+
+    named = client.post(
+        "/api/ask",
+        json={
+            "question": "Which sectors does Warren Buffett favor?",
+            "mode": "auto",
+        },
+    )
+    assert named.status_code == 200
+    analysis = named.json()["sector_analysis"]
+    assert analysis["coverage"]["requested_institution_count"] == 1
+    assert analysis["institutions"][0]["institution_id"] == "berkshire"
+
+
+def test_sector_answer_preserves_same_issuer_security_classes(client):
+    for period, class_a, class_b in (
+        ("2026-03-31", 100, 20),
+        ("2026-06-30", 125, 30),
+    ):
+        snapshot = PortfolioSnapshot(
+            "berkshire",
+            period,
+            "2026-08-14",
+            "https://www.sec.gov/berkshire-fixture",
+            f"berkshire-{period}",
+            holdings=[
+                Holding("LENNAR CORP", "CL A", "526057104", class_a, 1_000),
+                Holding("LENNAR CORP", "CL B", "526057302", class_b, 200),
+            ],
+        )
+        main.service.store.save_snapshot(
+            "portfolio", "berkshire", period, snapshot.to_dict()
+        )
+
+    payload = client.post(
+        "/api/ask",
+        json={
+            "question": "Which sectors does Warren Buffett favor?",
+            "mode": "auto",
+        },
+    ).json()
+    changes = payload["sector_analysis"]["institutions"][0]["position_changes"]
+    assert {change["cusip"] for change in changes} == {"526057104", "526057302"}
+    assert {change["security_class"] for change in changes} == {"CL A", "CL B"}
+    assert {change["share_type"] for change in changes} == {"SH"}
+    descriptions = payload["sector_sections"]["accumulation"]
+    assert len(descriptions) == 2
+    assert len(set(descriptions)) == 2
+    assert any("LENNAR CORP (CL A)" in item for item in descriptions)
+    assert any("LENNAR CORP (CL B)" in item for item in descriptions)
+
+
+def test_sector_overview_without_saved_data_is_useful(tmp_path):
+    result = ResearchService(LocalStore(tmp_path / "empty-sector.sqlite3")).ask(
+        "Which sectors are institutional investors buying?"
+    )
+    assert result["intent"] == "institutional_sector_analysis"
+    assert result["sector_analysis"]["coverage"]["institution_count"] == 0
+    assert result["sector_analysis"]["coverage"][
+        "requested_institution_count"
+    ] == len(INSTITUTIONS)
+    assert set(result["sector_analysis"]["unavailable_institutions"]) == {
+        institution.id for institution in INSTITUTIONS
+    }
+    assert "No saved institutional disclosure" in result["answer"]
 
 
 def test_track_edit_evaluate_history(client):
@@ -137,6 +390,80 @@ def test_watch_follow_and_sourced_ask(client):
     assert no_motive["evidence"]
     assert "does not provide the reason" in no_motive["sections"]["short_answer"]
     assert no_motive["sections"]["numbers"]
+
+
+@pytest.mark.parametrize("mode", ["auto", "general"])
+def test_general_ask_never_falls_through_to_aapl(client, monkeypatch, mode):
+    monkeypatch.setattr(
+        "backend.service.generate_general_answer",
+        lambda *args, **kwargs: GenerationResult(
+            "Medical AI is likely to develop through validated clinical workflows.",
+            True,
+        ),
+    )
+    answer = client.post(
+        "/api/ask",
+        json={
+            "question": "How do you think medical AI will develop in the future?",
+            "mode": mode,
+        },
+    ).json()
+    assert answer["intent"] == "general"
+    assert "Medical AI" in answer["answer"]
+    assert "AAPL" not in str(answer)
+    assert answer["evidence"] == []
+
+
+def test_general_configuration_failure_is_explicit(client, monkeypatch):
+    monkeypatch.setattr(
+        "backend.service.generate_general_answer",
+        lambda *args, **kwargs: GenerationResult(
+            None, False, "General AI is not configured."
+        ),
+    )
+    answer = client.post(
+        "/api/ask",
+        json={"question": "Explain medical AI", "mode": "general"},
+    ).json()
+    assert answer["configuration_error"] == "General AI is not configured."
+    assert answer["source"] == "General AI configuration"
+
+
+@pytest.mark.parametrize("mode", ["auto", "general"])
+def test_general_transient_provider_error_is_controlled_and_logged(
+    client, monkeypatch, caplog, mode
+):
+    private_question = "How do you think medical AI will develop in the future?"
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("synthetic transient provider failure")
+
+    monkeypatch.setattr("backend.service.generate_general_answer", fail)
+    with caplog.at_level("INFO", logger="thesislens.ask"):
+        response = client.post(
+            "/api/ask", json={"question": private_question, "mode": mode}
+        )
+
+    assert response.status_code == 200
+    answer = response.json()
+    assert answer["intent"] == "general"
+    assert answer["configuration_error_code"] == "ollama_temporary_error"
+    assert answer["evidence"] == []
+    assert answer["request_id"] == response.headers["X-Request-ID"]
+    assert "request_id=" in caplog.text
+    assert "routed_intent=general" in caplog.text
+    assert "duration_ms=" in caplog.text
+    assert "exception_type=RuntimeError" in caplog.text
+    assert private_question not in caplog.text
+
+
+def test_unknown_financial_ticker_does_not_substitute_aapl(client):
+    answer = client.post(
+        "/api/ask", json={"question": "What was ZZZZ revenue?", "mode": "auto"}
+    ).json()
+    assert answer["intent"] == "financial_research"
+    assert "AAPL" not in str(answer)
+    assert "ZZZZ" in answer["answer"]
 
 
 @pytest.mark.parametrize(

@@ -186,6 +186,33 @@ test("empty feed and earlier coverage are not presented as latest", async ({
   ).toBeVisible();
 });
 
+test("source failure is distinct from an empty successful cache", async ({
+  page,
+}) => {
+  await page.route("**/api/market-pulse", (route) =>
+    route.fulfill({
+      json: {
+        ...feed,
+        events: [],
+        watchlist_event_count: 0,
+        status: "source_unavailable",
+        diagnostic:
+          "Market Pulse sources are unavailable and no successful cached events exist.",
+        skipped_candidate_count: 0,
+      },
+    }),
+  );
+  await page.goto("/market-pulse");
+  await expect(
+    page.getByRole("heading", {
+      name: "Market Pulse sources are unavailable",
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/no successful cached events exist/i),
+  ).toBeVisible();
+});
+
 test("live cached Pulse page has source labels without causal claims", async ({
   page,
 }) => {

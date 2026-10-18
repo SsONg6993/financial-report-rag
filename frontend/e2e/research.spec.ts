@@ -1,6 +1,54 @@
 import { test, expect } from "@playwright/test";
 
+for (const [name, ticker, company] of [
+  ["Tesla", "TSLA", "Tesla, Inc."],
+  ["Keysight", "KEYS", "Keysight Technologies, Inc."],
+] as const) {
+  test(`SEC company search resolves ${name} to ${ticker}`, async ({ page }) => {
+    await page.goto("/research");
+    const search = page.getByRole("search");
+    await search
+      .getByRole("textbox", { name: "Search companies, investors, or tickers" })
+      .fill(name);
+    await expect(
+      search.getByRole("button", { name: new RegExp(company) }),
+    ).toBeVisible();
+    await search.getByRole("button", { name: new RegExp(company) }).click();
+    await expect(page).toHaveURL(new RegExp(`/research/${ticker}$`));
+    await expect(
+      page.getByRole("heading", { name: company, exact: true }),
+    ).toBeVisible();
+    await page.screenshot({
+      path: `test-results/company-${ticker.toLowerCase()}-${test.info().project.name}.png`,
+      fullPage: true,
+    });
+  });
+}
+
+test("light mode is optional and persists during navigation", async ({
+  page,
+}) => {
+  await page.goto("/research/AAPL");
+  await page.getByRole("button", { name: "Switch to light mode" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await page.getByRole("link", { name: "Explore", exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(
+    page.getByRole("heading", { name: "Featured investors" }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: `test-results/discover-light-${test.info().project.name}.png`,
+    fullPage: true,
+  });
+});
+
 test("rendered disclosure context and viewport layout", async ({ page }) => {
+  const disclosureRequests: string[] = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path === "/api/insiders/AAPL" || path === "/api/ownership/AAPL")
+      disclosureRequests.push(path);
+  });
   await page.goto("/research/AAPL");
   await page
     .getByRole("heading", { name: "Ideas to Track", exact: true })
@@ -8,6 +56,7 @@ test("rendered disclosure context and viewport layout", async ({ page }) => {
   await page.screenshot({
     path: `test-results/research-viewport-${test.info().project.name}.png`,
   });
+  expect(disclosureRequests).toEqual([]);
   await page
     .getByText("Advanced tracking, disclosures, and source details", {
       exact: true,
@@ -32,25 +81,25 @@ test("rendered disclosure context and viewport layout", async ({ page }) => {
   ).toBe(true);
 });
 
-test("real Home and Discover have dated disclosure data", async ({ page }) => {
+test("real Home and Explore have dated disclosure data", async ({ page }) => {
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Top Investor Activity" }),
+    page.getByRole("heading", { name: "Institutional Activity" }),
   ).toBeVisible();
   await expect(page.getByText("SEC Form 13F").first()).toBeVisible();
   await page.screenshot({
     path: `test-results/home-${test.info().project.name}.png`,
     fullPage: true,
   });
-  await page.getByRole("link", { name: "Discover", exact: true }).click();
+  await page.getByRole("link", { name: "Explore", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Featured investors" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Berkshire Hathaway" }),
+    page.getByRole("heading", { name: "Berkshire Hathaway", exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Coatue Management" }),
+    page.getByRole("heading", { name: "Coatue Management", exact: true }),
   ).toBeVisible();
   await page.screenshot({
     path: `test-results/discover-${test.info().project.name}.png`,
@@ -61,6 +110,65 @@ test("real Home and Discover have dated disclosure data", async ({ page }) => {
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBe(true);
+});
+
+test("portfolio network compares stored disclosures and supports interaction", async ({
+  page,
+}) => {
+  await page.goto("/discover");
+  await expect(
+    page.getByRole("heading", { name: "Institutional Portfolio Network" }),
+  ).toBeVisible();
+  const canvas = page.getByTestId("portfolio-network-canvas");
+  await expect(canvas).toBeVisible();
+  await expect(page.getByText("Common to all")).toBeVisible();
+  await page
+    .getByText("Definitions, source coverage, and position changes")
+    .click();
+  await expect(
+    page.getByText(/13F filings are delayed and incomplete/),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Zoom in" }).click();
+  await page.getByRole("button", { name: "Reset view" }).click();
+  await expect(
+    page.getByRole("table", { name: "Pairwise Jaccard similarity heatmap" }),
+  ).toBeVisible();
+  const node = canvas
+    .getByRole("button", { name: /Select .* portfolio node/ })
+    .first();
+  await node.focus();
+  await page.keyboard.press("Enter");
+  await expect(
+    page.getByRole("complementary", { name: "Selected network node details" }),
+  ).toBeVisible();
+  await page.getByPlaceholder("Filter company or ticker").fill("AAPL");
+  await expect(
+    page.getByRole("button", { name: "Clear company filter" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Clear company filter" }).click();
+  const period = page.getByRole("combobox", { name: "Reporting date" });
+  await period.selectOption("2026-03-31");
+  await expect(period).toHaveValue("2026-03-31");
+  await page.screenshot({
+    path: `test-results/portfolio-network-${test.info().project.name}.png`,
+    fullPage: true,
+  });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+});
+
+test("portfolio network honors reduced motion", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/discover");
+  await expect(
+    page.getByRole("button", { name: "Play historical timeline" }),
+  ).toBeDisabled();
+  await expect(
+    page.getByText("Playback disabled for reduced motion"),
+  ).toBeVisible();
 });
 test("Berkshire to AAPL to tracking and evaluation persists", async ({
   page,
@@ -141,10 +249,16 @@ test("watchlist works without a thesis and Ask does not invent rationale", async
   await expect(
     page.getByRole("button", { name: "Watching", exact: true }),
   ).toBeVisible();
+  const homeFeed = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/home/feed" && response.ok(),
+  );
   await page.getByRole("link", { name: "Home", exact: true }).click();
+  await homeFeed;
   await expect(
-    page.getByRole("heading", { name: "NVDA", exact: true }).last(),
+    page.getByRole("heading", { name: "My Watchlist" }),
   ).toBeVisible();
+  await expect(page.getByRole("row", { name: /NVDA/ })).toBeVisible();
   await page.goto("/ask");
   await page
     .getByLabel("What would you like to investigate?")
@@ -213,9 +327,10 @@ test("followed GOOGL disclosure answer stays factual and sourced", async ({
   await expect(
     page.getByRole("heading", { name: "What the evidence supports" }),
   ).toBeVisible();
-  await page.getByText(/Sources & evidence/).click();
+  const evidence = page.getByText(/Sources & evidence/);
   const sourceLinks = page.getByRole("link", { name: "Original source ↗" });
-  if (await sourceLinks.count()) {
+  if (await evidence.count()) {
+    await evidence.click();
     await expect(sourceLinks.first()).toHaveAttribute("href", /sec.gov/);
   } else {
     await expect(page.getByText(/No verified matching holdings/)).toBeVisible();

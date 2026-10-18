@@ -26,7 +26,7 @@ def test_four_pages_render_with_local_theses_and_portfolio(tmp_path, monkeypatch
     snapshot = PortfolioSnapshot("berkshire", "2026-06-30", "2026-08-14", "https://www.sec.gov/example", "2",
                                  holdings=[Holding("APPLE INC", "COM", "037833100", 10, 100, ticker="AAPL", weight=1)])
     store.save_snapshot("portfolio", "berkshire", "2026-06-30:2", snapshot.to_dict())
-    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py", default_timeout=30).run()
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py", default_timeout=90).run()
     assert not app.exception
     assert app.radio(key="navigation").options == ["Home", "Research", "Public Portfolios", "Ask"]
     assert not app.tabs

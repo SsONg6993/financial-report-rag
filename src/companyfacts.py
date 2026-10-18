@@ -6,7 +6,7 @@ from pathlib import Path
 
 from src.analytics import calculate_history
 from src.models import AnnualFinancials
-from src.sec import SEC_DATA, normalize_ticker, sec_session
+from src.sec import SEC_DATA, get_json, normalize_ticker, sec_session
 
 CONCEPTS: dict[str, tuple[str, ...]] = {
     "revenue": ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet"),
@@ -148,11 +148,10 @@ def fetch_company_facts(
     if cache_path.exists() and not refresh:
         payload = json.loads(cache_path.read_text(encoding="utf-8"))
     else:
-        response = sec_session().get(
-            f"{SEC_DATA}/api/xbrl/companyfacts/CIK{cik:010d}.json", timeout=60
+        payload = get_json(
+            sec_session(), f"{SEC_DATA}/api/xbrl/companyfacts/CIK{cik:010d}.json",
+            timeout=60,
         )
-        response.raise_for_status()
-        payload = response.json()
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         temporary = cache_path.with_suffix(".tmp")
         temporary.write_text(json.dumps(payload), encoding="utf-8")
