@@ -2,7 +2,23 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Moon, ScanSearch, Sun } from "lucide-react";
+import { Activity, Moon, ScanSearch, Sun } from "lucide-react";
+
+const primaryItems = [
+  { label: "Home", href: "/", paths: ["/"] },
+  {
+    label: "Explore",
+    href: "/explore",
+    paths: ["/explore", "/discover", "/research"],
+  },
+  {
+    label: "Intelligence",
+    href: "/intelligence",
+    paths: ["/intelligence", "/market-pulse"],
+  },
+  { label: "Ask AI", href: "/ask", paths: ["/ask"] },
+];
+
 export function Navigation() {
   const pathname = usePathname();
   const [light, setLight] = useState(false);
@@ -20,7 +36,7 @@ export function Navigation() {
   }
   return (
     <header className="sticky top-0 z-40 border-b border-border/70 bg-background/88 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-[1200px] items-center justify-between gap-3 px-4 py-3 sm:px-8">
+      <div className="site-header-inner mx-auto flex max-w-[1200px] items-center justify-between gap-3 px-4 py-3 sm:px-8">
         <Link
           href="/"
           className="flex items-center gap-2.5 text-lg font-semibold tracking-tight"
@@ -32,45 +48,47 @@ export function Navigation() {
         </Link>
         <nav
           aria-label="Main navigation"
-          className="flex min-w-0 items-center overflow-x-auto rounded-xl border border-border/60 bg-card/45 p-1"
+          className="primary-nav min-w-0 rounded-xl border border-border/60 bg-card/45 p-1"
         >
-          <Link
-            className="nav-link"
-            aria-current={pathname === "/" ? "page" : undefined}
-            href="/"
-          >
-            Home
-          </Link>
-          {[
-            ["Discover", "/discover"],
-            ["Research", "/research"],
-            ["Intelligence", "/intelligence"],
-            ["Market Pulse", "/market-pulse"],
-            ["Ask", "/ask"],
-            ["Status", "/status"],
-          ].map(([x, href]) => (
+          {primaryItems.map((item) => {
+            const active = item.paths.some((path) =>
+              path === "/" ? pathname === "/" : pathname.startsWith(path),
+            );
+            return (
             <Link
-              key={x}
+              key={item.label}
               className="nav-link"
-              aria-current={pathname.startsWith(href) ? "page" : undefined}
-              href={href}
+              aria-current={active ? "page" : undefined}
+              href={item.href}
             >
-              {x}
+              {item.label}
             </Link>
-          ))}
+            );
+          })}
         </nav>
-        <button
-          type="button"
-          onClick={toggleTheme}
-          aria-label={light ? "Switch to dark mode" : "Switch to light mode"}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-primary transition hover:bg-accent"
-        >
-          {light ? (
-            <Moon size={17} aria-hidden />
-          ) : (
-            <Sun size={17} aria-hidden />
-          )}
-        </button>
+        <div className="header-actions flex shrink-0 items-center gap-2">
+          <Link
+            href="/status"
+            aria-label="System status and settings"
+            title="System status and settings"
+            aria-current={pathname.startsWith("/status") ? "page" : undefined}
+            className="header-icon-button"
+          >
+            <Activity size={17} aria-hidden />
+          </Link>
+          <button
+            type="button"
+            onClick={toggleTheme}
+            aria-label={light ? "Switch to dark mode" : "Switch to light mode"}
+            className="header-icon-button"
+          >
+            {light ? (
+              <Moon size={17} aria-hidden />
+            ) : (
+              <Sun size={17} aria-hidden />
+            )}
+          </button>
+        </div>
       </div>
     </header>
   );

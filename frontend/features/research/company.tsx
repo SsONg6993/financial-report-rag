@@ -328,20 +328,29 @@ function Disclosures({
   ticker: string;
   kind: "insiders" | "ownership";
 }) {
+  const [open, setOpen] = useState(false);
   const q = useQuery({
     queryKey: [kind, ticker],
     queryFn: ({ signal }) =>
       api("/" + kind + "/" + ticker, disclosureSchema, { signal }),
-    refetchInterval: 120_000,
+    enabled: open,
+    staleTime: 10 * 60_000,
   });
   return (
-    <details className="panel">
+    <details
+      className="panel"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
       <summary className="font-semibold">
         {kind === "insiders"
           ? "Insider activity · SEC Form 4"
           : "Major ownership · Schedule 13D/G"}
       </summary>
-      {q.isPending ? (
+      {!open ? (
+        <p className="source mt-3">
+          Open to load the latest saved disclosure records.
+        </p>
+      ) : q.isPending ? (
         <Loading />
       ) : q.isError ? (
         <ErrorState retry={() => q.refetch()} />
@@ -392,7 +401,7 @@ export function CompanyResearch({ ticker }: { ticker: string }) {
     queryKey: ["company", ticker],
     queryFn: ({ signal }) =>
       api("/company/" + ticker, companySchema, { signal }),
-    refetchInterval: 60_000,
+    staleTime: 5 * 60_000,
   });
   if (q.isPending) return <Loading />;
   if (q.isError) return <ErrorState retry={() => q.refetch()} />;

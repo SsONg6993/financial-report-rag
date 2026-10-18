@@ -17,7 +17,8 @@ export function HomeFeed({ highlights }: { highlights: ReactNode }) {
   const feed = useQuery({
     queryKey: ["home"],
     queryFn: ({ signal }) => api("/home/feed", homeSchema, { signal }),
-    refetchInterval: 120_000,
+    staleTime: 2 * 60_000,
+    refetchInterval: 5 * 60_000,
   });
   if (feed.isPending) return <Loading />;
   if (feed.isError) return <ErrorState retry={() => feed.refetch()} />;

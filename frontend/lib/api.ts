@@ -62,8 +62,13 @@ const holdingSchema = z.object({
   share_type: z.string().default("SH"),
   ticker_source: z.string().default(""),
   ticker_verified: z.boolean().default(false),
-  entry_price_estimate: z
-    .object({
+  entry_price_estimate: z.preprocess(
+    (value) =>
+      value && typeof value === "object" && Object.keys(value).length === 0
+        ? undefined
+        : value,
+    z
+      .object({
       status: z.enum(["not_reliably_estimable", "indicative_range"]),
       label: z.string(),
       actual_purchase_price: z.number().nullable(),
@@ -81,8 +86,9 @@ const holdingSchema = z.object({
       method: z.string(),
       assumptions: z.array(z.string()),
       source_url: z.string(),
-    })
-    .optional(),
+      })
+      .optional(),
+  ),
 });
 export const changeSchema = z
   .object({
@@ -272,6 +278,7 @@ const sectorInstitutionSchema = z.object({
       cusip: z.string(),
       security_class: z.string(),
       put_call: z.string(),
+      share_type: z.string().default("SH"),
       activity: z.string(),
       shares_before: z.number(),
       comparable_shares_before: z.number(),
@@ -634,9 +641,11 @@ export const answerSchema = z.object({
       "ollama_timeout",
       "ollama_loading",
       "ollama_invalid_response",
+      "ollama_temporary_error",
     ])
     .nullable()
     .optional(),
+  request_id: z.string().nullable().optional(),
   privacy: z
     .string()
     .default("No private workspace data was sent to an external model."),
@@ -678,6 +687,7 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
+    public requestId?: string,
   ) {
     super(message);
   }
@@ -701,15 +711,18 @@ export async function api<T>(
       0,
     );
   }
-  if (!response.ok)
+  if (!response.ok) {
+    const requestId = response.headers.get("X-Request-ID") ?? undefined;
     throw new ApiError(
       response.status === 422
         ? "Please check the information you entered."
         : response.status === 500
-          ? `The API returned HTTP 500 for /api${path}. The backend is running but this request failed.`
+          ? `The API returned HTTP 500 for /api${path}. The backend is running but this request failed.${requestId ? ` Reference: ${requestId}.` : ""}`
           : "The research service is unavailable. Your saved work is safe; please retry.",
       response.status,
+      requestId,
     );
+  }
   const parsed = schema.safeParse(await response.json());
   if (!parsed.success)
     throw new ApiError(

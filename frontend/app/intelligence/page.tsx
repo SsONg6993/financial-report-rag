@@ -1,4 +1,8 @@
 import { IntelligenceFeed } from "@/features/intelligence/feed";
+import {
+  intelligenceNavigation,
+  SectionNavigation,
+} from "@/components/section-navigation";
 
 export default function IntelligencePage() {
   return (
@@ -12,6 +16,11 @@ export default function IntelligencePage() {
           investment merit.
         </p>
       </div>
+      <SectionNavigation
+        active="/intelligence"
+        ariaLabel="Intelligence sections"
+        items={intelligenceNavigation}
+      />
       <IntelligenceFeed />
     </div>
   );
