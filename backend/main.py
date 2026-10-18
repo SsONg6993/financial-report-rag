@@ -1,12 +1,17 @@
 """Run: python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000."""
 
-from typing import Literal
+import logging
+import os
+import time
+from typing import Annotated, Literal
+from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 load_dotenv()
+from backend.logging_config import configure_logging
 from backend.models import (
     Answer,
     Company,
@@ -18,9 +23,13 @@ from backend.models import (
     Thesis,
 )
 from backend.service import ResearchService
+from src.ask_intent import route_ask
 from src.company_directory import CompanyDirectory
 from src.sec import normalize_ticker
 from src.thesis import RULE_METRICS
+
+configure_logging()
+logger = logging.getLogger("thesislens.api")
 
 app = FastAPI(
     title="ThesisLens",
@@ -70,7 +79,8 @@ class Toggle(BaseModel):
 
 class AskInput(BaseModel):
     question: str = Field(min_length=3, max_length=2000)
-    ticker: str = "AAPL"
+    ticker: str | None = None
+    mode: Literal["auto", "general", "research"] = "auto"
 
 
 def valid_ticker(ticker):
@@ -86,9 +96,41 @@ def valid_investor(key):
     return key
 
 
+@app.middleware("http")
+async def log_unexpected_errors(request, call_next):
+    request_id = uuid4().hex
+    request.state.request_id = request_id
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+    except Exception as exc:
+        logger.error(
+            "api_request_failed request_id=%s routed_intent=%s duration_ms=%.1f "
+            "exception_type=%s method=%s path=%s",
+            request_id,
+            getattr(request.state, "routed_intent", "unrouted"),
+            (time.perf_counter() - started) * 1000,
+            type(exc).__name__,
+            request.method,
+            request.url.path,
+        )
+        raise
+
+
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    from backend.runtime_status import liveness
+
+    return liveness()
+
+
+@app.get("/api/readiness")
+def runtime_readiness():
+    from backend.runtime_status import readiness
+
+    return readiness(service)
 
 
 @app.get("/api/home/feed", response_model=Feed)
@@ -105,6 +147,34 @@ def home(background: BackgroundTasks):
 @app.get("/api/investors", response_model=list[Investor])
 def investors():
     return service.investors()
+
+
+@app.get("/api/investors/summaries", response_model=list[Investor])
+def investor_summaries():
+    return service.investor_summaries()
+
+
+@app.get("/api/portfolio-overlap")
+def portfolio_overlap(
+    investors: Annotated[list[str], Query(min_length=2, max_length=5)],
+    period: str | None = None,
+):
+    try:
+        return service.portfolio_overlap(investors, period)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/api/sector-intelligence")
+def sector_intelligence(
+    investors: Annotated[list[str] | None, Query()] = None,
+    period: str | None = None,
+    sector: str | None = None,
+):
+    try:
+        return service.sector_intelligence(investors, period, sector)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.get("/api/companies/search")
@@ -152,7 +222,9 @@ def resolve_investor(data: ResolveManager):
         item = service.registry.resolve_cik(data.cik)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    except Exception as exc:  # SEC source boundary; surface a typed unavailable response.
+    except (
+        Exception
+    ) as exc:  # SEC source boundary; surface a typed unavailable response.
         raise HTTPException(
             503, f"SEC resolution unavailable: {type(exc).__name__}"
         ) from exc
@@ -242,10 +314,31 @@ def public_officials():
             "disclosure_type": d["disclosure_type"],
             "filing_date": d.get("filing_date", ""),
             "source_document_date": d.get("source_document_date", ""),
+            "certification_date": d.get("certification_date", ""),
             "source_url": d["source_url"],
-            "records": d.get("records", [])[:50],
+            "records": d.get("records", [])[:1000],
             "notes": d.get("notes", ""),
             "table_validation_rate": d.get("table_validation_rate"),
+            "extraction": d.get(
+                "extraction",
+                {
+                    "status": "review_required" if not d.get("records") else "partial_verified",
+                    "method": "legacy_table_extraction",
+                    "text_layer_status": "unknown",
+                    "ocr_used": False,
+                    "pages_total": len(d.get("excerpts", [])),
+                    "pages_with_text": 0,
+                    "pages_with_tables": 0,
+                    "raw_fragment_count": 0,
+                    "candidate_count": len(d.get("records", [])) + d.get("rejected_rows", 0),
+                    "verified_count": len(d.get("records", [])),
+                    "rejected_count": d.get("rejected_rows", 0),
+                    "deduplicated_count": 0,
+                    "coverage_rate": d.get("table_validation_rate", 0) or 0,
+                    "confidence": "unknown",
+                    "rejection_reasons": {},
+                },
+            ),
         }
         for d in documents[:3]
     ]
@@ -293,13 +386,34 @@ def disclosures():
 
 
 @app.post("/api/ask", response_model=Answer)
-def ask(data: AskInput, background: BackgroundTasks):
+def ask(data: AskInput, background: BackgroundTasks, request: Request):
+    started = time.perf_counter()
+    request_id = request.state.request_id
     if any(
         word in data.question.lower()
         for word in ("news", "macro", "market pulse", "oil prices")
     ):
         service.market_pulse.schedule(background)
-    return service.ask(data.question.strip(), valid_ticker(data.ticker))
+    ticker = valid_ticker(data.ticker) if data.ticker else None
+    route = route_ask(data.question.strip(), data.mode, ticker)
+    request.state.routed_intent = route.intent.value
+    result = service.ask(
+        data.question.strip(),
+        ticker,
+        data.mode,
+        route=route,
+        request_id=request_id,
+    )
+    result["request_id"] = request_id
+    logger.info(
+        "ask_request_completed request_id=%s routed_intent=%s duration_ms=%.1f "
+        "exception_type=%s",
+        request_id,
+        route.intent.value,
+        (time.perf_counter() - started) * 1000,
+        "None",
+    )
+    return result
 
 
 @app.get("/api/market-pulse")
@@ -340,9 +454,14 @@ def market_pulse_impacts(event_id: str):
 
 
 @app.get("/api/intelligence/feed")
-def intelligence_feed(category: str = "all", limit: int = 50):
+def intelligence_feed(
+    background: BackgroundTasks, category: str = "all", limit: int = 50
+):
     try:
-        return service.intelligence.feed(category, limit)
+        if os.getenv("THESISLENS_OFFLINE", "false").lower() == "true":
+            return service.intelligence.feed(category, limit)
+        service.intelligence.schedule(background)
+        return service.intelligence.feed(category, limit, materialize=False)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -353,35 +472,57 @@ def institutional_activity(ticker: str):
 
 
 @app.get("/api/intelligence/daily-brief")
-def intelligence_daily_brief():
-    return service.intelligence.daily_brief()
+def intelligence_daily_brief(background: BackgroundTasks):
+    if os.getenv("THESISLENS_OFFLINE", "false").lower() == "true":
+        return service.intelligence.daily_brief()
+    service.intelligence.schedule(background)
+    return service.intelligence.daily_brief(materialize=False)
 
 
 @app.get("/api/intelligence/outbox")
 def intelligence_outbox():
-    return {"notifications": service.store.notifications(),
-            "note": "Local queue; external delivery is optional and disabled by default."}
+    return {
+        "notifications": service.store.notifications(),
+        "note": "Local queue; external delivery is optional and disabled by default.",
+    }
 
 
 @app.get("/api/intelligence/sources")
 def public_sources():
     followed = set(service.store.source_follows())
-    sources = [{"id": item.id, "name": item.name, "source_url": item.url,
-                "followed": item.id in followed,
-                "checked_at": service.market_pulse.state(item).get("checked_at"),
-                "error": service.market_pulse.state(item).get("error")}
-               for item in service.market_pulse.providers]
-    sources.append({"id": "berkshire-letters", "name": "Berkshire shareholder letters",
-                    "source_url": service.public_providers["website"].URL,
-                    "followed": "berkshire-letters" in followed,
-                    "checked_at": None, "error": "Year-only index; no dated feed events"})
-    return {"sources": sources,
-            "note": "Official public sources only. X/Twitter is disabled."}
+    sources = [
+        {
+            "id": item.id,
+            "name": item.name,
+            "source_url": item.url,
+            "followed": item.id in followed,
+            "checked_at": service.market_pulse.state(item).get("checked_at"),
+            "error": service.market_pulse.state(item).get("error"),
+        }
+        for item in service.market_pulse.providers
+    ]
+    sources.append(
+        {
+            "id": "berkshire-letters",
+            "name": "Berkshire shareholder letters",
+            "source_url": service.public_providers["website"].URL,
+            "followed": "berkshire-letters" in followed,
+            "checked_at": None,
+            "error": "Year-only index; no dated feed events",
+        }
+    )
+    return {
+        "sources": sources,
+        "note": "Official public sources only. X/Twitter is disabled.",
+    }
 
 
 @app.put("/api/intelligence/sources/{source_id}/follow")
 def follow_public_source(source_id: str, data: Toggle):
-    if not any(provider.resolve_source(source_id) for provider in service.public_providers.values()):
+    if not any(
+        provider.resolve_source(source_id)
+        for provider in service.public_providers.values()
+    ):
         raise HTTPException(404, "Unsupported public source")
     service.store.follow_source(source_id, data.enabled)
     return {"source_id": source_id, "followed": data.enabled}

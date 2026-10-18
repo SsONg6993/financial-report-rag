@@ -4,7 +4,7 @@ Follow great investors. Understand what they own. Verify the thesis yourself.
 
 ## Primary application: Next.js + FastAPI
 
-The consumer app is now `frontend/`, with only **Home, Discover, Research, Ask** in its primary navigation. Streamlit is retained only as an internal/debug workspace. Public holdings are research inputs, not recommendations; position changes do not establish motive.
+The consumer app is now `frontend/`, with **Home, Discover, Research, Market Pulse, Ask, and Status** in its primary navigation. Streamlit is retained only as an internal/debug workspace. Public holdings are research inputs, not recommendations; position changes do not establish motive.
 
 ```text
 Next.js 16 / React 19 / TypeScript / Tailwind 4 / shadcn / TanStack Query / Zod
@@ -13,6 +13,24 @@ FastAPI / Pydantic → existing src/ financial and retrieval services
                               ↓
 SEC EDGAR + XBRL / local SQLite / Qdrant + BM25S / optional Jev + Ollama
 ```
+
+### One-command Windows startup
+
+After installing the Python and frontend dependencies once, start the complete local app from the repository root:
+
+```powershell
+.\start-thesislens.ps1
+```
+
+The manager verifies the project `.venv`, detects port conflicts, reuses only a matching healthy Backend, starts installed local Ollama when needed, checks the configured model without downloading it, starts one Frontend, waits for readiness, verifies `http://localhost:3000`, and opens that address. Internal process and health probes continue to use IPv4 loopback. Use `-NoBrowser` for terminal-only startup. It records only process IDs, start times, a random instance identifier, and build metadata under ignored `.runtime/`; rotating logs are capped there as well.
+
+```powershell
+.\status-thesislens.ps1       # safe dependency summary; never prints secrets
+.\status-thesislens.ps1 -Json # machine-readable summary
+.\stop-thesislens.ps1         # stops only verified manager-owned process trees
+```
+
+An unrelated or unverifiable listener on port 8000 or 3000 is never terminated. Close it yourself after confirming ownership, then rerun startup. The manager does not install services, create startup tasks, change Windows settings, download models, use force-kill, or expose the local API to the network. The Status page provides the same Backend, Market Pulse, General AI, and Frontend diagnostics with a manual refresh control.
 
 ### Run the backend (PowerShell terminal 1)
 
@@ -44,6 +62,12 @@ The existing research product now also has an additive tracked-entity registry (
 
 The local notification outbox needs no credentials. For an explicit due RSS refresh and cache materialization, run `.\.venv\Scripts\python.exe -m backend.refresh --public-updates --intelligence` from the repository root. For one optional Telegram or self-hosted ntfy delivery attempt, run `.\.venv\Scripts\python.exe -m backend.refresh --notifications`. Use `--notification-dry-run` to preview Telegram, ntfy, and Hermes-consumer messages without credentials, network calls, or outbox changes. See [Hermes and notifications](docs/hermes-integration.md) for setup and security boundaries. These commands do not crawl all managers.
 
+### Institutional portfolio network (V3)
+
+Discover includes an interactive 2–5 manager comparison powered only by stored verified disclosures. It provides class-aware CUSIP matching, common and unique holding counts, all-manager and pairwise Jaccard similarity, disclosed-weight overlap, source dates, position changes, historical date playback, and a bounded zoomable/pannable network. See [the V3 calculation and coverage contract](docs/thesislens-v3-portfolio-network.md). Shared holdings are not evidence of shared intent, and 13F data remains delayed and incomplete.
+
+Investor profiles and Ask also expose [Institutional Sector Intelligence](docs/institutional-sector-intelligence.md). It uses a deliberately small CUSIP-keyed registry, official SEC filer SIC metadata, and a documented public SIC-to-sector mapping. Unmapped securities remain **Unknown** and reduce the displayed coverage percentage. Sector weights describe dated reported value; reported share changes are shown separately and never presented as future purchases.
+
 Playwright E2E is isolated: `cd frontend; npm run test:e2e` starts dedicated localhost servers, forces offline mode, initializes/migrates a synthetic database at `.e2e-runtime/thesislens-e2e.sqlite3`, and replaces **only that guarded test database** at the start of each run. The browser tests never connect to `data/local/thesislens.sqlite3`; external QA URLs and a personal `THESISLENS_DB` are rejected before startup. `.e2e-runtime/`, screenshots, browser traces, generated caches, and `.env` are ignored. The fixture contains synthetic public-research data—not copied personal records. Do not guess or restore any user records changed by earlier browser runs.
 
 SQLite V2 migration is additive and transactional. Before upgrading a personal database, stop both app servers and make a dated copy of `data/local/thesislens.sqlite3` to a private backup outside the repository. Do not overwrite the source database if an upgrade fails; preserve it and the backup for diagnosis. Migration tests cover clean install, V1 watchlist/follows/theses/evaluations preservation, idempotence, and rollback on schema conflict.
@@ -54,8 +78,10 @@ Company search uses the free [SEC ticker/CIK/exchange directory](https://www.sec
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
+| GET | `/api/health`, `/api/readiness` | Lightweight liveness and version-aware local dependency readiness |
 | GET | `/api/home/feed`, `/api/investors` | Discovery, activity, ideas, watchlist |
 | GET | `/api/investors/{id}`, `/holdings`, `/changes` | Profile, reported positions, deterministic share changes |
+| GET | `/api/sector-intelligence?investors={id}&period={date}&sector={name}` | Dated identifier-backed sector allocation and comparable-period changes |
 | PUT | `/api/investors/{id}/follow` | Persist followed institution |
 | GET | `/api/company/{ticker}`, `/changes`, `/suggested-theses`, `/theses` | Company research and evidence |
 | GET | `/api/companies/search?q=`, `/api/companies/resolve?q=` | Validated SEC identity suggestions and explicit resolution |
@@ -75,7 +101,16 @@ Request-triggered background refresh uses persistent check/error timestamps, pro
 
 | Source | Check interval | Important distinction |
 | --- | --- | --- |
-| Yahoo market snapshot | 5 minutes | Optional, delayed/unavailable; timestamp is shown |
+| Configured market snapshot | 5 minutes by default | Optional, delayed/unavailable; provider, timestamp, failures, and stale-cache state are shown |
+
+Market quotes are optional and never gate SEC filing research. Configure the
+comma-separated `MARKET_DATA_PROVIDERS` list with `yahoo` and/or `nasdaq`, or
+leave it empty for filing-only operation. `MARKET_DATA_TIMEOUT_SECONDS` bounds
+each provider request and `MARKET_CACHE_TTL_SECONDS` controls the displayed
+freshness policy. The backend records provider attempts, preserves the latest
+successful quote when a refresh fails, and never exposes credentials to the
+frontend. These are best-effort public sources with no uptime or licensing SLA;
+operators remain responsible for complying with current provider terms.
 | Official ARKK holdings | 24 hours | Fund-level daily holdings, not institutional 13F |
 | SEC Form 4 | 30 minutes | Insider transaction date and filing date; P/S codes label BUY/SELL, not recommendations |
 | Schedule 13D/G | 1 hour | Disclosed ownership percentage, filer and amendment; no inferred motives |
@@ -94,7 +129,7 @@ cd C:\Users\User\Documents\Projects\financial-report-rag
 
 `--company` and `--investor` can be repeated. `THESISLENS_OFFLINE=true` disables request-triggered network refresh while retaining cached functionality.
 
-Featured adapters: Berkshire, Pershing, Appaloosa, Bridgewater, Scion, Duquesne, Soros, Tiger Global, Coatue, and official ARKK. Unavailable/stale investors stay visible. Exact issuer-name ticker matching is deliberately incomplete; an unmapped security is not guessed. Common share classes can be resolved from explicit cached SEC filing-cover rows (for example Alphabet Class A/GOOGL and Class C/GOOG), with the mapping source retained. Duplicate legacy cache keys are deduplicated by source/period before comparisons. Sector exposure can remain Unclassified. Originals only: 13F amendments are not consolidated.
+Featured adapters: Berkshire, Pershing, Appaloosa, Bridgewater, Scion, Duquesne, Soros, Tiger Global, Coatue, and official ARKK. Unavailable/stale investors stay visible. Exact issuer-name ticker matching is deliberately incomplete; an unmapped security is not guessed. Common share classes can be resolved from explicit cached SEC filing-cover rows (for example Alphabet Class A/GOOGL and Class C/GOOG), with the mapping source retained. Duplicate legacy cache keys are deduplicated by source/period before comparisons. Sector exposure remains Unknown unless a CUSIP has an explicit sourced classification. Originals only: 13F amendments are not consolidated.
 
 ### Suggested theses and What Changed
 
@@ -110,7 +145,7 @@ Ask protects investor motives: “Why did Berkshire reduce AAPL?” returns no s
 
 See `docs/consumer-verification.md` for actual measured test results, source observations and limitations. Browser tests use a copy of the real local database; they must not target personal saved research. Synthetic fixtures exist only in Python unit tests.
 
-Screenshot locations after browser QA: `frontend/test-results/home-desktop.png`, `discover-desktop.png`, `investor-desktop.png`, `research-desktop.png`, `nvda-desktop.png`, `ask-desktop.png`, plus mobile variants. These are generated artifacts, not mocked screens. Documentation screenshot slots: Home / Discover / Research / investor profile (capture with the E2E suite).
+Screenshot locations after browser QA: `frontend/test-results/home-desktop.png`, `discover-desktop.png`, `investor-desktop.png`, `research-desktop.png`, `nvda-desktop.png`, `ask-desktop.png`, and `runtime-dashboard-desktop.png`, plus mobile variants. These are generated artifacts, not mocked screens. Documentation screenshot slots: Home / Discover / Research / investor profile / Runtime Status (capture with the E2E suite).
 
 ```powershell
 # Python tests, from repository root
@@ -131,12 +166,14 @@ An evidence-driven investment thesis monitoring and public-disclosure research s
 
 ThesisLens helps investors track whether new company evidence strengthens or weakens their own investment thesis, while using public institutional and public-official disclosures for research and idea discovery. It reports evidence relationships and research questions, without BUY / SELL / HOLD recommendations or a numeric investment score.
 
-### Four internal/debug pages
+### Four primary destinations
 
 - **Home**: locally persisted watchlist, thesis-health counts, meaningful comparable-period changes, and followed disclosures.
-- **Research**: a compact company summary, editable thesis points, evidence evaluation, thesis timeline, dated changes, and an investigation checklist. Valuation and technical evidence tools are collapsed.
-- **Public Portfolios**: official institutional disclosures, reported holdings and share changes, plus a separate OGE public-financial-disclosure section.
-- **Ask**: questions across locally loaded theses, company facts, filing evidence, and public portfolio snapshots.
+- **Explore**: institutional portfolios, overlap analysis, range-preserving public-official disclosures, and contextual access to company Research.
+- **Intelligence**: the personalized public-source feed and contextual access to Market Pulse.
+- **Ask AI**: intent-routed questions across locally loaded theses, company facts, filing evidence, public portfolio snapshots, and configured local general AI.
+
+Runtime **Status** remains available as a secondary system entry. Legacy `/discover`, `/research`, `/intelligence`, and `/market-pulse` URLs remain compatible; `/discover` redirects to `/explore`.
 
 The previous ten-tab dashboard has been replaced. Financial calculations, risk extraction, valuation, retrieval, reranking, evaluation, and optional providers remain reusable backend modules.
 
@@ -208,7 +245,7 @@ Narrative evaluation retrieves current filing evidence and a comparable same-for
 
 13F has no ticker or sector fields. Unambiguous exact issuer-name matches against the official SEC ticker directory can supply tickers; unmatched/ambiguous classes need user verification. Optional Yahoo Finance sector enrichment shows coverage and leaves unmatched holdings unclassified.
 
-OGE reports are not exact brokerage portfolios. Amount/income ranges are preserved, weights are never inferred, and unknown filing dates remain unknown. The selected official May 2026 transaction PDF has a noisy text layer: invalid rows are excluded and source-page excerpts are available for verification. Annual PDFs retain source excerpts; reliable annual section normalization and OCR require further work. OGE access requirements may prevent automatic downloads.
+OGE reports are not exact brokerage portfolios. Amount/income ranges are preserved, weights are never inferred, and unknown filing dates remain unknown. OGE 278-T transaction reports use a form-specific row validator; OGE 278e annual reports remain a separate source-excerpt workflow. The selected official May 2026 transaction PDF has a degraded text layer: only rows with validated dates, transaction types, notification fields, and official amount bands are shown, while rejected rows remain counted by reason. Every verified row retains its source page. OCR is reserved for unusable text layers and requires a compatible local OCR runtime; it is not used to inflate coverage. OGE access requirements may prevent automatic downloads.
 
 ## AAPL + Berkshire example
 
