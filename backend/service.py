@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import threading
+import time
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,7 +24,7 @@ from backend.research_context import (
 from backend.suggestions import CATEGORIES, suggested_theses
 from backend.tickers import enrich_cached_classes
 from src.ask import answer_question
-from src.ask_intent import AskIntent, route_ask
+from src.ask_intent import AskIntent, AskRoute, route_ask
 from src.company_directory import CompanyDirectory
 from src.config import AppConfig
 from src.decision import JevDecisionProvider
@@ -446,26 +447,31 @@ class ResearchService:
         sector: str | None = None,
     ) -> dict:
         requested = list(dict.fromkeys(institution_ids or []))
-        if requested:
-            missing = [key for key in requested if self.registry.get(key) is None]
+        explicit_selection = bool(requested)
+        registry = {institution.id: institution for institution in self.registry.all()}
+        if explicit_selection:
+            missing = [key for key in requested if key not in registry]
             if missing:
                 raise ValueError("Unknown institution: " + ", ".join(missing))
         else:
-            requested = [
-                institution.id
-                for institution in self.registry.all()
-                if self.portfolios(institution.id)
-            ]
-        if len(requested) > 10:
+            # An omitted selection means a complete tracked-manager overview.
+            # Keep managers without saved data visible in coverage rather than
+            # silently dropping them from the requested population.
+            requested = list(registry)
+        if explicit_selection and len(requested) > 10:
             raise ValueError("Select no more than 10 institutions.")
+        snapshots_by_id = {
+            key: self.portfolios(key)
+            for key in requested
+        }
         institutions = []
         unavailable = []
         for key in requested:
-            snapshots = self.portfolios(key)
+            snapshots = snapshots_by_id[key]
             if not snapshots:
                 unavailable.append(key)
                 continue
-            institution = self.registry.get(key)
+            institution = registry.get(key)
             try:
                 analysis = analyze_sector_exposure(
                     snapshots,
@@ -591,22 +597,26 @@ class ResearchService:
         selected = self._institution_ids_in_question(question)
         data = self.sector_intelligence(selected or None)
         aggregate = data["aggregate"]
+        classified = [row for row in aggregate if row["sector"] != "Unknown"]
         count = data["coverage"]["institution_count"]
         if not count:
             short = (
                 "No saved institutional disclosure is available for sector analysis. "
                 "A verified dated portfolio snapshot is required."
             )
-        elif aggregate:
-            leader = aggregate[0]
+        elif classified:
+            leader = classified[0]
             scope = (
                 data["institutions"][0]["name"]
                 if len(data["institutions"]) == 1
                 else f"{count} institutions with saved disclosures"
             )
+            coverage = data["coverage"]["classified_value_percentage"]
             short = (
-                f"In the latest comparable saved data for {scope}, "
+                f"Among the {coverage:.1%} of reported value with verified sector "
+                f"classification in the latest comparable saved data for {scope}, "
                 f"{leader['sector']} has the largest combined reported value. "
+                "Unknown classifications remain included in the coverage table. "
                 "This is historical allocation evidence, not a prediction of the next purchase."
             )
         else:
@@ -616,9 +626,22 @@ class ResearchService:
         historical = []
         for analysis in data["institutions"]:
             for change in analysis["position_changes"]:
+                security_details = (
+                    [change["security_class"]] if change["security_class"] else []
+                )
+                if change["put_call"]:
+                    security_details.append(change["put_call"])
+                if change["share_type"] and change["share_type"] != "SH":
+                    security_details.append(change["share_type"])
+                security_label = (
+                    f" ({' · '.join(security_details)})"
+                    if any(security_details)
+                    else ""
+                )
                 label = (
                     f"{analysis['name']} · {change['sector']} · "
-                    f"{change['ticker'] or change['issuer']}: {change['activity'].lower()} "
+                    f"{change['ticker'] or change['issuer']}{security_label}: "
+                    f"{change['activity'].lower()} "
                     f"reported shares ({analysis['previous_period']} to "
                     f"{analysis['reporting_period']})."
                 )
@@ -634,7 +657,7 @@ class ResearchService:
         limitations = [
             "13F data is delayed and incomplete; it omits many asset classes, short positions, and some hedges.",
             "A sector-weight change can reflect security-price movement as well as position changes.",
-            "Reported share changes do not identify transaction dates, prices, rationale, or future intent.",
+            "Reported share-count increases are not confirmed purchases; disclosures do not identify transaction dates, prices, rationale, or future intent.",
             "Unknown classifications remain in coverage and are not silently removed.",
         ]
         evidence = [
@@ -1119,8 +1142,11 @@ class ResearchService:
         question: str,
         ticker: str | None = None,
         mode: str = "auto",
+        *,
+        route: AskRoute | None = None,
+        request_id: str = "unavailable",
     ) -> dict:
-        route = route_ask(question, mode, ticker)
+        route = route or route_ask(question, mode, ticker)
         metadata = {
             "intent": route.intent.value,
             "mode": mode,
@@ -1129,16 +1155,46 @@ class ResearchService:
             "privacy": "No private workspace data was sent to an external model.",
         }
         if route.intent is AskIntent.GENERAL:
-            result = generate_general_answer(
-                question,
-                self.config.ollama_model,
-                self.config.ollama_base_url,
-                self.config.allow_remote_llm,
-                self.config.ollama_readiness_timeout,
-                self.config.ollama_inference_timeout,
-                self.config.ollama_readiness_retries,
-            )
+            started = time.perf_counter()
+            try:
+                result = generate_general_answer(
+                    question,
+                    self.config.ollama_model,
+                    self.config.ollama_base_url,
+                    self.config.allow_remote_llm,
+                    self.config.ollama_readiness_timeout,
+                    self.config.ollama_inference_timeout,
+                    self.config.ollama_readiness_retries,
+                )
+            except Exception as exc:  # noqa: BLE001 - isolate the local model boundary.
+                logging.getLogger("thesislens.ask").error(
+                    "general_ai_provider_failed request_id=%s routed_intent=%s "
+                    "duration_ms=%.1f exception_type=%s",
+                    request_id,
+                    route.intent.value,
+                    (time.perf_counter() - started) * 1000,
+                    type(exc).__name__,
+                )
+                return {
+                    **metadata,
+                    "answer": "The local Ollama request failed temporarily. Retry in a moment.",
+                    "evidence": [],
+                    "source": "Local General AI runtime",
+                    "configuration_error": (
+                        "The local Ollama request failed temporarily. Retry in a moment."
+                    ),
+                    "configuration_error_code": "ollama_temporary_error",
+                }
             if not result.available:
+                logging.getLogger("thesislens.ask").warning(
+                    "general_ai_unavailable request_id=%s routed_intent=%s "
+                    "duration_ms=%.1f exception_type=%s error_code=%s",
+                    request_id,
+                    route.intent.value,
+                    (time.perf_counter() - started) * 1000,
+                    result.exception_type or "ControlledFailure",
+                    result.error_code or "ollama_unavailable",
+                )
                 return {
                     **metadata,
                     "answer": result.error or "General AI is unavailable.",
